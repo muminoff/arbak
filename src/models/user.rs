@@ -21,6 +21,10 @@ pub struct User {
     /// Whether the user's email has been verified
     #[schema(example = true)]
     pub email_verified: bool,
+    /// Timestamp when all tokens were revoked (logout-all). Tokens issued before this are invalid.
+    #[serde(skip_serializing)]
+    #[schema(ignore)]
+    pub tokens_revoked_at: Option<DateTime<Utc>>,
     /// Timestamp when the account was created
     pub created_at: DateTime<Utc>,
     /// Timestamp when the account was last modified

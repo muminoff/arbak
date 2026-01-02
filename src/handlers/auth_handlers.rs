@@ -12,7 +12,10 @@ use crate::{
     auth::{hash_password, AuthUser},
     error::{AppError, AppResult, ErrorResponse},
     models::{CreateUser, UserWithRoles},
-    repositories::{EmailVerificationRepository, PasswordResetRepository, RevokedTokenRepository, UserRepository},
+    repositories::{
+        EmailVerificationRepository, PasswordResetRepository, RevokedTokenRepository,
+        UserRepository,
+    },
     services::{AuthResponse, AuthService, LoginRequest, RegisterResponse},
     AppState,
 };
@@ -417,6 +420,35 @@ async fn logout(
     }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/auth/logout-all",
+    tag = "auth",
+    operation_id = "logoutAllSessions",
+    summary = "Logout from all sessions",
+    description = "Invalidates all JWT tokens for the current user by setting a revocation timestamp. \
+                   All tokens issued before this timestamp become invalid. \
+                   Use this to sign out from all devices at once.",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "All sessions invalidated successfully", body = MessageResponse),
+        (status = 401, description = "Missing or invalid authentication token", body = ErrorResponse)
+    )
+)]
+async fn logout_all(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> AppResult<Json<MessageResponse>> {
+    // Revoke all tokens for this user
+    UserRepository::revoke_all_tokens(&state.pool, claims.sub).await?;
+
+    tracing::info!("User {} logged out from all sessions", claims.sub);
+
+    Ok(Json(MessageResponse {
+        message: "All sessions have been logged out".to_string(),
+    }))
+}
+
 /// Create auth routes - split into public and protected
 pub fn auth_routes() -> (Router<AppState>, Router<AppState>) {
     let public = Router::new()
@@ -430,7 +462,8 @@ pub fn auth_routes() -> (Router<AppState>, Router<AppState>) {
     let protected = Router::new()
         .route("/refresh", post(refresh))
         .route("/me", get(me))
-        .route("/logout", post(logout));
+        .route("/logout", post(logout))
+        .route("/logout-all", post(logout_all));
 
     (public, protected)
 }

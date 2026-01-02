@@ -858,3 +858,107 @@ async fn test_logout_only_invalidates_current_token() {
     let (status, _) = make_request(app, "GET", "/api/auth/me", None, Some(&token2)).await;
     assert_eq!(status, StatusCode::OK);
 }
+
+// ============================================================================
+// Logout-All Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_logout_all_success() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool.clone());
+
+    let unique_email = format!("logout_all_{}@example.com", uuid::Uuid::new_v4());
+    let (token, state) = register_and_verify_user(&pool, state, &unique_email, "password123").await;
+
+    // Logout-all should succeed
+    let app = arbak::routes::create_router(state.clone());
+    let (status, body) = make_request(app, "POST", "/api/auth/logout-all", None, Some(&token)).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["message"].as_str().unwrap().contains("All sessions"));
+}
+
+#[tokio::test]
+async fn test_logout_all_requires_auth() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let app = arbak::routes::create_router(state);
+
+    let (status, _) = make_request(app, "POST", "/api/auth/logout-all", None, None).await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_logout_all_invalidates_all_tokens() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool.clone());
+
+    let unique_email = format!("logout_all_multi_{}@example.com", uuid::Uuid::new_v4());
+    let (token1, state) = register_and_verify_user(&pool, state, &unique_email, "password123").await;
+
+    // Login again to get a second token
+    let app = arbak::routes::create_router(state.clone());
+    let (status, body) = make_request(
+        app,
+        "POST",
+        "/api/auth/login",
+        Some(json!({
+            "email": &unique_email,
+            "password": "password123"
+        })),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let token2 = body["access_token"].as_str().unwrap().to_string();
+
+    // Both tokens should work
+    let app = arbak::routes::create_router(state.clone());
+    let (status, _) = make_request(app, "GET", "/api/auth/me", None, Some(&token1)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    let app = arbak::routes::create_router(state.clone());
+    let (status, _) = make_request(app, "GET", "/api/auth/me", None, Some(&token2)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Logout-all with first token
+    let app = arbak::routes::create_router(state.clone());
+    let (status, _) = make_request(app, "POST", "/api/auth/logout-all", None, Some(&token1)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Both tokens should now be invalid
+    let app = arbak::routes::create_router(state.clone());
+    let (status, _) = make_request(app, "GET", "/api/auth/me", None, Some(&token1)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    let app = arbak::routes::create_router(state.clone());
+    let (status, _) = make_request(app, "GET", "/api/auth/me", None, Some(&token2)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Wait to ensure new token is issued in a different second
+    // (JWT iat has second precision, so tokens in same second as revocation are rejected)
+    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+
+    // New login should work (new token issued after revocation)
+    let app = arbak::routes::create_router(state.clone());
+    let (status, body) = make_request(
+        app,
+        "POST",
+        "/api/auth/login",
+        Some(json!({
+            "email": &unique_email,
+            "password": "password123"
+        })),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let new_token = body["access_token"].as_str().unwrap().to_string();
+
+    // New token should work
+    let app = arbak::routes::create_router(state);
+    let (status, _) = make_request(app, "GET", "/api/auth/me", None, Some(&new_token)).await;
+    assert_eq!(status, StatusCode::OK);
+}

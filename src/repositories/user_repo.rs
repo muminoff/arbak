@@ -13,7 +13,7 @@ impl UserRepository {
     pub async fn find_by_email(pool: &PgPool, email: &str) -> AppResult<Option<User>> {
         let user = sqlx::query_as::<_, User>(
             r#"
-            SELECT id, email, password_hash, is_active, email_verified, created_at, updated_at
+            SELECT id, email, password_hash, is_active, email_verified, tokens_revoked_at, created_at, updated_at
             FROM users
             WHERE email = $1
             "#,
@@ -29,7 +29,7 @@ impl UserRepository {
     pub async fn find_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<User>> {
         let user = sqlx::query_as::<_, User>(
             r#"
-            SELECT id, email, password_hash, is_active, email_verified, created_at, updated_at
+            SELECT id, email, password_hash, is_active, email_verified, tokens_revoked_at, created_at, updated_at
             FROM users
             WHERE id = $1
             "#,
@@ -47,7 +47,7 @@ impl UserRepository {
             r#"
             INSERT INTO users (email, password_hash)
             VALUES ($1, $2)
-            RETURNING id, email, password_hash, is_active, email_verified, created_at, updated_at
+            RETURNING id, email, password_hash, is_active, email_verified, tokens_revoked_at, created_at, updated_at
             "#,
         )
         .bind(email)
@@ -154,7 +154,7 @@ impl UserRepository {
     ) -> AppResult<Vec<User>> {
         let mut query = String::from(
             r#"
-            SELECT id, email, password_hash, is_active, email_verified, created_at, updated_at
+            SELECT id, email, password_hash, is_active, email_verified, tokens_revoked_at, created_at, updated_at
             FROM users
             WHERE 1=1
             "#,
@@ -238,7 +238,7 @@ impl UserRepository {
             UPDATE users
             SET email = $2, updated_at = NOW()
             WHERE id = $1
-            RETURNING id, email, password_hash, is_active, email_verified, created_at, updated_at
+            RETURNING id, email, password_hash, is_active, email_verified, tokens_revoked_at, created_at, updated_at
             "#,
         )
         .bind(id)
@@ -260,7 +260,7 @@ impl UserRepository {
             UPDATE users
             SET password_hash = $2, updated_at = NOW()
             WHERE id = $1
-            RETURNING id, email, password_hash, is_active, email_verified, created_at, updated_at
+            RETURNING id, email, password_hash, is_active, email_verified, tokens_revoked_at, created_at, updated_at
             "#,
         )
         .bind(id)
@@ -278,7 +278,7 @@ impl UserRepository {
             UPDATE users
             SET is_active = $2, updated_at = NOW()
             WHERE id = $1
-            RETURNING id, email, password_hash, is_active, email_verified, created_at, updated_at
+            RETURNING id, email, password_hash, is_active, email_verified, tokens_revoked_at, created_at, updated_at
             "#,
         )
         .bind(id)
@@ -302,5 +302,36 @@ impl UserRepository {
         .await?;
 
         Ok(result.rows_affected() > 0)
+    }
+
+    /// Revoke all tokens for a user (logout-all).
+    /// Sets tokens_revoked_at to current time, invalidating all tokens issued before this.
+    pub async fn revoke_all_tokens(pool: &PgPool, id: Uuid) -> AppResult<()> {
+        sqlx::query(
+            r#"
+            UPDATE users SET tokens_revoked_at = NOW(), updated_at = NOW()
+            WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+        Ok(())
+    }
+
+    /// Get tokens_revoked_at timestamp for a user (for auth middleware).
+    pub async fn get_tokens_revoked_at(
+        pool: &PgPool,
+        id: Uuid,
+    ) -> AppResult<Option<chrono::DateTime<chrono::Utc>>> {
+        let result = sqlx::query_scalar::<_, Option<chrono::DateTime<chrono::Utc>>>(
+            r#"SELECT tokens_revoked_at FROM users WHERE id = $1"#,
+        )
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(result.flatten())
     }
 }

@@ -7,10 +7,10 @@ use crate::{
     error::ErrorResponse,
     handlers::{
         auth_handlers::{
-            __path_forgot_password, __path_login, __path_logout, __path_me, __path_refresh,
-            __path_register, __path_resend_verification, __path_reset_password, __path_verify_email,
-            ForgotPasswordRequest, MessageResponse, ResendVerificationRequest, ResetPasswordRequest,
-            UserResponse, VerifyEmailRequest,
+            __path_forgot_password, __path_login, __path_logout, __path_logout_all, __path_me,
+            __path_refresh, __path_register, __path_resend_verification, __path_reset_password,
+            __path_verify_email, ForgotPasswordRequest, MessageResponse, ResendVerificationRequest,
+            ResetPasswordRequest, UserResponse, VerifyEmailRequest,
         },
         document_handlers::{
             __path_create_document, __path_delete_document, __path_get_document,
@@ -75,6 +75,7 @@ use crate::{
         register,
         login,
         logout,
+        logout_all,
         verify_email,
         resend_verification,
         refresh,

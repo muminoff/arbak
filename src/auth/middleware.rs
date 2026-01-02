@@ -8,7 +8,7 @@ use axum::{
 use crate::{
     auth::{decode_token, Claims},
     error::{AppError, AppResult},
-    repositories::RevokedTokenRepository,
+    repositories::{RevokedTokenRepository, UserRepository},
     AppState,
 };
 
@@ -38,9 +38,19 @@ pub async fn auth_middleware(
     let token = extract_bearer_token(&request)?;
     let claims = decode_token(token, &state.config.jwt_secret)?;
 
-    // Check if token has been revoked (logout)
+    // Check if token has been revoked (single logout)
     if RevokedTokenRepository::is_token_revoked(&state.pool, claims.jti).await? {
         return Err(AppError::Unauthorized);
+    }
+
+    // Check if all tokens were revoked (logout-all)
+    // Compare at second level since JWT iat is in seconds, but DB stores microseconds
+    // Use <= to reject tokens issued in the same second as revocation (security: err on side of caution)
+    if let Some(revoked_at) = UserRepository::get_tokens_revoked_at(&state.pool, claims.sub).await?
+    {
+        if claims.iat <= revoked_at.timestamp() {
+            return Err(AppError::Unauthorized);
+        }
     }
 
     // Store claims in request extensions for handlers to access
