@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
+use utoipa::ToSchema;
 use uuid::Uuid;
 
 use crate::{
@@ -9,16 +10,21 @@ use crate::{
     repositories::{RoleRepository, UserRepository},
 };
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, ToSchema)]
 pub struct AuthResponse {
+    #[schema(example = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...")]
     pub access_token: String,
+    #[schema(example = "Bearer")]
     pub token_type: String,
+    #[schema(example = 900)]
     pub expires_in: i64,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, ToSchema)]
 pub struct LoginRequest {
+    #[schema(example = "user@example.com")]
     pub email: String,
+    #[schema(example = "securepassword123")]
     pub password: String,
 }
 

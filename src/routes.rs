@@ -1,8 +1,10 @@
 use axum::{middleware, Router};
 use tower_http::cors::{Any, CorsLayer};
 use tower_http::trace::TraceLayer;
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
-use crate::{auth::auth_middleware, handlers, AppState};
+use crate::{auth::auth_middleware, handlers, openapi::ApiDoc, AppState};
 
 pub fn create_router(state: AppState) -> Router {
     let cors = CorsLayer::new()
@@ -26,6 +28,7 @@ pub fn create_router(state: AppState) -> Router {
 
     // Combine all routes under /api
     Router::new()
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
         .nest("/api", public_routes.merge(protected_routes))
         .layer(cors)
         .layer(TraceLayer::new_for_http())

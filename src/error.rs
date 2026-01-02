@@ -3,7 +3,16 @@ use axum::{
     response::{IntoResponse, Response},
     Json,
 };
+use serde::Serialize;
 use serde_json::json;
+use utoipa::ToSchema;
+
+/// Standard error response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct ErrorResponse {
+    #[schema(example = "Error message here")]
+    pub error: String,
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum AppError {

@@ -8,13 +8,46 @@ use uuid::Uuid;
 use crate::{
     auth::AuthUser,
     db::AuthenticatedConnection,
-    error::{AppError, AppResult},
-    models::{CreateDocument, ShareDocument, UpdateDocument},
+    error::{AppError, AppResult, ErrorResponse},
+    models::{CreateDocument, Document, DocumentAccess, ShareDocument, UpdateDocument},
     repositories::DocumentRepository,
     AppState,
 };
 
-/// GET /api/documents
+/// Response wrapper for document list
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct DocumentListResponse {
+    pub data: Vec<Document>,
+}
+
+/// Response wrapper for single document
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct DocumentResponse {
+    pub data: Document,
+}
+
+/// Response wrapper for document access
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct DocumentAccessResponse {
+    pub data: DocumentAccess,
+}
+
+/// Response for delete operation
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct DeleteResponse {
+    pub message: String,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/documents",
+    tag = "documents",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "List of accessible documents", body = DocumentListResponse),
+        (status = 401, description = "Not authenticated", body = ErrorResponse)
+    )
+)]
 async fn list_documents(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
@@ -26,7 +59,20 @@ async fn list_documents(
     Ok(Json(serde_json::json!({ "data": docs })))
 }
 
-/// GET /api/documents/:id
+#[utoipa::path(
+    get,
+    path = "/api/documents/{id}",
+    tag = "documents",
+    security(("bearer_auth" = [])),
+    params(
+        ("id" = Uuid, Path, description = "Document ID")
+    ),
+    responses(
+        (status = 200, description = "Document details", body = DocumentResponse),
+        (status = 401, description = "Not authenticated", body = ErrorResponse),
+        (status = 404, description = "Document not found", body = ErrorResponse)
+    )
+)]
 async fn get_document(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
@@ -41,7 +87,18 @@ async fn get_document(
     Ok(Json(serde_json::json!({ "data": doc })))
 }
 
-/// POST /api/documents
+#[utoipa::path(
+    post,
+    path = "/api/documents",
+    tag = "documents",
+    security(("bearer_auth" = [])),
+    request_body = CreateDocument,
+    responses(
+        (status = 200, description = "Document created", body = DocumentResponse),
+        (status = 400, description = "Validation error", body = ErrorResponse),
+        (status = 401, description = "Not authenticated", body = ErrorResponse)
+    )
+)]
 async fn create_document(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
@@ -65,7 +122,21 @@ async fn create_document(
     Ok(Json(serde_json::json!({ "data": doc })))
 }
 
-/// PUT /api/documents/:id
+#[utoipa::path(
+    put,
+    path = "/api/documents/{id}",
+    tag = "documents",
+    security(("bearer_auth" = [])),
+    params(
+        ("id" = Uuid, Path, description = "Document ID")
+    ),
+    request_body = UpdateDocument,
+    responses(
+        (status = 200, description = "Document updated", body = DocumentResponse),
+        (status = 401, description = "Not authenticated", body = ErrorResponse),
+        (status = 404, description = "Document not found", body = ErrorResponse)
+    )
+)]
 async fn update_document(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
@@ -87,7 +158,20 @@ async fn update_document(
     Ok(Json(serde_json::json!({ "data": doc })))
 }
 
-/// DELETE /api/documents/:id
+#[utoipa::path(
+    delete,
+    path = "/api/documents/{id}",
+    tag = "documents",
+    security(("bearer_auth" = [])),
+    params(
+        ("id" = Uuid, Path, description = "Document ID")
+    ),
+    responses(
+        (status = 200, description = "Document deleted", body = DeleteResponse),
+        (status = 401, description = "Not authenticated", body = ErrorResponse),
+        (status = 404, description = "Document not found", body = ErrorResponse)
+    )
+)]
 async fn delete_document(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
@@ -104,7 +188,22 @@ async fn delete_document(
     Ok(Json(serde_json::json!({ "message": "Document deleted" })))
 }
 
-/// POST /api/documents/:id/share
+#[utoipa::path(
+    post,
+    path = "/api/documents/{id}/share",
+    tag = "documents",
+    security(("bearer_auth" = [])),
+    params(
+        ("id" = Uuid, Path, description = "Document ID")
+    ),
+    request_body = ShareDocument,
+    responses(
+        (status = 200, description = "Document shared", body = DocumentAccessResponse),
+        (status = 401, description = "Not authenticated", body = ErrorResponse),
+        (status = 403, description = "Not document owner", body = ErrorResponse),
+        (status = 404, description = "Document not found", body = ErrorResponse)
+    )
+)]
 async fn share_document(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,

@@ -6,14 +6,23 @@ use axum::{
 
 use crate::{
     auth::AuthUser,
-    error::AppResult,
-    models::CreateUser,
+    error::{AppResult, ErrorResponse},
+    models::{CreateUser, UserWithRoles},
     repositories::UserRepository,
     services::{AuthResponse, AuthService, LoginRequest},
     AppState,
 };
 
-/// POST /api/auth/register
+#[utoipa::path(
+    post,
+    path = "/api/auth/register",
+    tag = "auth",
+    request_body = CreateUser,
+    responses(
+        (status = 200, description = "User registered successfully", body = AuthResponse),
+        (status = 400, description = "Validation error", body = ErrorResponse)
+    )
+)]
 async fn register(
     State(state): State<AppState>,
     Json(input): Json<CreateUser>,
@@ -29,7 +38,16 @@ async fn register(
     Ok(Json(response))
 }
 
-/// POST /api/auth/login
+#[utoipa::path(
+    post,
+    path = "/api/auth/login",
+    tag = "auth",
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "Login successful", body = AuthResponse),
+        (status = 401, description = "Invalid credentials", body = ErrorResponse)
+    )
+)]
 async fn login(
     State(state): State<AppState>,
     Json(input): Json<LoginRequest>,
@@ -45,7 +63,16 @@ async fn login(
     Ok(Json(response))
 }
 
-/// POST /api/auth/refresh (requires auth)
+#[utoipa::path(
+    post,
+    path = "/api/auth/refresh",
+    tag = "auth",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "Token refreshed", body = AuthResponse),
+        (status = 401, description = "Invalid or expired token", body = ErrorResponse)
+    )
+)]
 async fn refresh(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
@@ -61,7 +88,22 @@ async fn refresh(
     Ok(Json(response))
 }
 
-/// GET /api/auth/me (requires auth)
+/// Response wrapper for user data
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct UserResponse {
+    pub data: UserWithRoles,
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/auth/me",
+    tag = "auth",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "Current user info", body = UserResponse),
+        (status = 401, description = "Not authenticated", body = ErrorResponse)
+    )
+)]
 async fn me(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
