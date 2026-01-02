@@ -55,7 +55,8 @@ pub struct DeleteResponse {
     operation_id = "listDocuments",
     summary = "List accessible documents",
     description = "Returns a paginated list of documents the authenticated user can access. This includes documents \
-                   they own, documents shared with them, and public documents. Results are filtered by PostgreSQL RLS policies.",
+                   they own, documents shared with them, and public documents. Results are filtered by PostgreSQL RLS policies. \
+                   Use the 'search' parameter to filter by title or content (case-insensitive).",
     security(("bearer_auth" = [])),
     params(PaginationParams),
     responses(
@@ -66,20 +67,21 @@ pub struct DeleteResponse {
 async fn list_documents(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
-    Query(pagination): Query<PaginationParams>,
+    Query(params): Query<PaginationParams>,
 ) -> AppResult<Json<DocumentListResponse>> {
     let mut conn = AuthenticatedConnection::new(&state.pool, claims.sub).await?;
 
-    let limit = pagination.limit();
-    let offset = pagination.offset();
+    let limit = params.limit();
+    let offset = params.offset();
+    let search = params.search.as_deref();
 
-    let docs = DocumentRepository::find_all(conn.executor(), limit, offset).await?;
-    let total_items = DocumentRepository::count(conn.executor()).await?;
+    let docs = DocumentRepository::find_all(conn.executor(), limit, offset, search).await?;
+    let total_items = DocumentRepository::count(conn.executor(), search).await?;
     conn.commit().await?;
 
     Ok(Json(DocumentListResponse {
         data: docs,
-        pagination: PaginationMeta::new(pagination.page, limit, total_items),
+        pagination: PaginationMeta::new(params.page, limit, total_items),
     }))
 }
 

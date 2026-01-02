@@ -9,37 +9,75 @@ use crate::{
 pub struct DocumentRepository;
 
 impl DocumentRepository {
-    /// Find all documents with pagination (RLS will filter based on current user).
+    /// Find all documents with pagination and optional search (RLS will filter based on current user).
     pub async fn find_all(
         tx: &mut Transaction<'_, Postgres>,
         limit: i64,
         offset: i64,
+        search: Option<&str>,
     ) -> AppResult<Vec<Document>> {
-        let docs = sqlx::query_as::<_, Document>(
-            r#"
-            SELECT id, title, content, owner_id, is_public, created_at, updated_at
-            FROM documents
-            ORDER BY created_at DESC
-            LIMIT $1 OFFSET $2
-            "#,
-        )
-        .bind(limit)
-        .bind(offset)
-        .fetch_all(&mut **tx)
-        .await?;
+        let docs = match search {
+            Some(term) if !term.trim().is_empty() => {
+                let pattern = format!("%{}%", term.trim());
+                sqlx::query_as::<_, Document>(
+                    r#"
+                    SELECT id, title, content, owner_id, is_public, created_at, updated_at
+                    FROM documents
+                    WHERE title ILIKE $3 OR content ILIKE $3
+                    ORDER BY created_at DESC
+                    LIMIT $1 OFFSET $2
+                    "#,
+                )
+                .bind(limit)
+                .bind(offset)
+                .bind(pattern)
+                .fetch_all(&mut **tx)
+                .await?
+            }
+            _ => {
+                sqlx::query_as::<_, Document>(
+                    r#"
+                    SELECT id, title, content, owner_id, is_public, created_at, updated_at
+                    FROM documents
+                    ORDER BY created_at DESC
+                    LIMIT $1 OFFSET $2
+                    "#,
+                )
+                .bind(limit)
+                .bind(offset)
+                .fetch_all(&mut **tx)
+                .await?
+            }
+        };
 
         Ok(docs)
     }
 
-    /// Count total documents (RLS will filter based on current user).
-    pub async fn count(tx: &mut Transaction<'_, Postgres>) -> AppResult<i64> {
-        let row: (i64,) = sqlx::query_as(
-            r#"
-            SELECT COUNT(*) FROM documents
-            "#,
-        )
-        .fetch_one(&mut **tx)
-        .await?;
+    /// Count total documents with optional search (RLS will filter based on current user).
+    pub async fn count(tx: &mut Transaction<'_, Postgres>, search: Option<&str>) -> AppResult<i64> {
+        let row: (i64,) = match search {
+            Some(term) if !term.trim().is_empty() => {
+                let pattern = format!("%{}%", term.trim());
+                sqlx::query_as(
+                    r#"
+                    SELECT COUNT(*) FROM documents
+                    WHERE title ILIKE $1 OR content ILIKE $1
+                    "#,
+                )
+                .bind(pattern)
+                .fetch_one(&mut **tx)
+                .await?
+            }
+            _ => {
+                sqlx::query_as(
+                    r#"
+                    SELECT COUNT(*) FROM documents
+                    "#,
+                )
+                .fetch_one(&mut **tx)
+                .await?
+            }
+        };
 
         Ok(row.0)
     }

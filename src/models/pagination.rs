@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-/// Query parameters for paginated list endpoints
+/// Query parameters for paginated and filtered document list
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct PaginationParams {
@@ -14,6 +14,10 @@ pub struct PaginationParams {
     #[param(minimum = 1, maximum = 100, default = 20, example = 20)]
     #[serde(default = "default_per_page")]
     pub per_page: i64,
+
+    /// Search term to filter documents by title or content (case-insensitive)
+    #[param(example = "quarterly report")]
+    pub search: Option<String>,
 }
 
 fn default_page() -> i64 {
