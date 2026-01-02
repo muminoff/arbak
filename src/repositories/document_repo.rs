@@ -9,19 +9,39 @@ use crate::{
 pub struct DocumentRepository;
 
 impl DocumentRepository {
-    /// Find all documents (RLS will filter based on current user).
-    pub async fn find_all(tx: &mut Transaction<'_, Postgres>) -> AppResult<Vec<Document>> {
+    /// Find all documents with pagination (RLS will filter based on current user).
+    pub async fn find_all(
+        tx: &mut Transaction<'_, Postgres>,
+        limit: i64,
+        offset: i64,
+    ) -> AppResult<Vec<Document>> {
         let docs = sqlx::query_as::<_, Document>(
             r#"
             SELECT id, title, content, owner_id, is_public, created_at, updated_at
             FROM documents
             ORDER BY created_at DESC
+            LIMIT $1 OFFSET $2
             "#,
         )
+        .bind(limit)
+        .bind(offset)
         .fetch_all(&mut **tx)
         .await?;
 
         Ok(docs)
+    }
+
+    /// Count total documents (RLS will filter based on current user).
+    pub async fn count(tx: &mut Transaction<'_, Postgres>) -> AppResult<i64> {
+        let row: (i64,) = sqlx::query_as(
+            r#"
+            SELECT COUNT(*) FROM documents
+            "#,
+        )
+        .fetch_one(&mut **tx)
+        .await?;
+
+        Ok(row.0)
     }
 
     /// Find a document by ID (RLS will filter).

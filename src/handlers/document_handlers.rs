@@ -1,5 +1,5 @@
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     routing::{get, post},
     Json, Router,
 };
@@ -9,7 +9,10 @@ use crate::{
     auth::AuthUser,
     db::AuthenticatedConnection,
     error::{AppError, AppResult, ErrorResponse},
-    models::{CreateDocument, Document, DocumentAccess, ShareDocument, UpdateDocument},
+    models::{
+        CreateDocument, Document, DocumentAccess, PaginationMeta, PaginationParams,
+        ShareDocument, UpdateDocument,
+    },
     repositories::DocumentRepository,
     AppState,
 };
@@ -17,8 +20,10 @@ use crate::{
 /// Paginated list of documents accessible to the current user
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct DocumentListResponse {
-    /// Array of documents the user can access (owned, shared, or public)
+    /// Array of documents for the current page
     pub data: Vec<Document>,
+    /// Pagination metadata
+    pub pagination: PaginationMeta,
 }
 
 /// Single document with full details
@@ -49,23 +54,33 @@ pub struct DeleteResponse {
     tag = "documents",
     operation_id = "listDocuments",
     summary = "List accessible documents",
-    description = "Returns all documents the authenticated user can access. This includes documents they own, \
-                   documents shared with them, and public documents. Results are filtered by PostgreSQL RLS policies.",
+    description = "Returns a paginated list of documents the authenticated user can access. This includes documents \
+                   they own, documents shared with them, and public documents. Results are filtered by PostgreSQL RLS policies.",
     security(("bearer_auth" = [])),
+    params(PaginationParams),
     responses(
-        (status = 200, description = "Documents retrieved successfully. May be empty if user has no accessible documents.", body = DocumentListResponse),
+        (status = 200, description = "Documents retrieved successfully with pagination metadata.", body = DocumentListResponse),
         (status = 401, description = "Missing or invalid authentication token", body = ErrorResponse)
     )
 )]
 async fn list_documents(
     State(state): State<AppState>,
     AuthUser(claims): AuthUser,
-) -> AppResult<Json<serde_json::Value>> {
+    Query(pagination): Query<PaginationParams>,
+) -> AppResult<Json<DocumentListResponse>> {
     let mut conn = AuthenticatedConnection::new(&state.pool, claims.sub).await?;
-    let docs = DocumentRepository::find_all(conn.executor()).await?;
+
+    let limit = pagination.limit();
+    let offset = pagination.offset();
+
+    let docs = DocumentRepository::find_all(conn.executor(), limit, offset).await?;
+    let total_items = DocumentRepository::count(conn.executor()).await?;
     conn.commit().await?;
 
-    Ok(Json(serde_json::json!({ "data": docs })))
+    Ok(Json(DocumentListResponse {
+        data: docs,
+        pagination: PaginationMeta::new(pagination.page, limit, total_items),
+    }))
 }
 
 #[utoipa::path(

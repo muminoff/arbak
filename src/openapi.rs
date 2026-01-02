@@ -14,8 +14,8 @@ use crate::{
         },
     },
     models::{
-        CreateDocument, CreateUser, Document, DocumentAccess, ShareDocument, UpdateDocument,
-        UserWithRoles,
+        CreateDocument, CreateUser, Document, DocumentAccess, PaginationMeta, ShareDocument,
+        UpdateDocument, UserWithRoles,
     },
     services::{AuthResponse, LoginRequest},
 };
@@ -73,6 +73,8 @@ use crate::{
             DocumentResponse,
             DocumentAccessResponse,
             DeleteResponse,
+            // Pagination
+            PaginationMeta,
             // Errors
             ErrorResponse,
         )
