@@ -17,10 +17,19 @@ use crate::{
     post,
     path = "/api/auth/register",
     tag = "auth",
-    request_body = CreateUser,
+    operation_id = "registerUser",
+    summary = "Register a new user",
+    description = "Creates a new user account with the provided email and password. \
+                   Automatically assigns the default 'user' role and returns a JWT token for immediate API access. \
+                   Password must be at least 8 characters.",
+    request_body(
+        description = "User registration credentials",
+        content = CreateUser
+    ),
     responses(
-        (status = 200, description = "User registered successfully", body = AuthResponse),
-        (status = 400, description = "Validation error", body = ErrorResponse)
+        (status = 201, description = "User created successfully. Returns JWT token valid for 15 minutes.", body = AuthResponse),
+        (status = 400, description = "Invalid input: email format incorrect or password too short (min 8 characters)", body = ErrorResponse),
+        (status = 409, description = "Email address is already registered", body = ErrorResponse)
     )
 )]
 async fn register(
@@ -42,10 +51,17 @@ async fn register(
     post,
     path = "/api/auth/login",
     tag = "auth",
-    request_body = LoginRequest,
+    operation_id = "loginUser",
+    summary = "Authenticate user",
+    description = "Validates user credentials and returns a JWT token for API access. \
+                   The token should be included in subsequent requests as 'Authorization: Bearer <token>'.",
+    request_body(
+        description = "User login credentials",
+        content = LoginRequest
+    ),
     responses(
-        (status = 200, description = "Login successful", body = AuthResponse),
-        (status = 401, description = "Invalid credentials", body = ErrorResponse)
+        (status = 200, description = "Login successful. Returns JWT token valid for 15 minutes.", body = AuthResponse),
+        (status = 401, description = "Invalid email or password, or user account is deactivated", body = ErrorResponse)
     )
 )]
 async fn login(
@@ -67,10 +83,14 @@ async fn login(
     post,
     path = "/api/auth/refresh",
     tag = "auth",
+    operation_id = "refreshToken",
+    summary = "Refresh access token",
+    description = "Issues a new JWT token using a valid existing token. Use this to extend your session \
+                   before the current token expires. The new token will have a fresh 15-minute validity period.",
     security(("bearer_auth" = [])),
     responses(
-        (status = 200, description = "Token refreshed", body = AuthResponse),
-        (status = 401, description = "Invalid or expired token", body = ErrorResponse)
+        (status = 200, description = "New JWT token issued successfully", body = AuthResponse),
+        (status = 401, description = "Current token is invalid, expired, or user account is deactivated", body = ErrorResponse)
     )
 )]
 async fn refresh(
@@ -88,9 +108,10 @@ async fn refresh(
     Ok(Json(response))
 }
 
-/// Response wrapper for user data
+/// Wrapper containing user profile data
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct UserResponse {
+    /// User profile with assigned roles
     pub data: UserWithRoles,
 }
 
@@ -98,10 +119,14 @@ pub struct UserResponse {
     get,
     path = "/api/auth/me",
     tag = "auth",
+    operation_id = "getCurrentUser",
+    summary = "Get current user profile",
+    description = "Returns the profile of the currently authenticated user, including their assigned roles. \
+                   Useful for displaying user info in the UI or checking permissions client-side.",
     security(("bearer_auth" = [])),
     responses(
-        (status = 200, description = "Current user info", body = UserResponse),
-        (status = 401, description = "Not authenticated", body = ErrorResponse)
+        (status = 200, description = "User profile retrieved successfully", body = UserResponse),
+        (status = 401, description = "Missing or invalid authentication token", body = ErrorResponse)
     )
 )]
 async fn me(

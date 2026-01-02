@@ -10,20 +10,27 @@ use crate::{
     repositories::{RoleRepository, UserRepository},
 };
 
+/// Authentication response containing JWT access token
 #[derive(Debug, Serialize, ToSchema)]
 pub struct AuthResponse {
-    #[schema(example = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9...")]
+    /// JWT access token. Include in Authorization header as 'Bearer <token>' for authenticated requests.
+    #[schema(example = "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiI1NTBlODQwMC1lMjliLTQxZDQtYTcxNi00NDY2NTU0NDAwMDAiLCJleHAiOjE3MDk4MzY4MDB9.signature")]
     pub access_token: String,
+    /// Token type, always 'Bearer' for this API
     #[schema(example = "Bearer")]
     pub token_type: String,
-    #[schema(example = 900)]
+    /// Token validity period in seconds from issue time. After expiration, use /auth/refresh to get a new token.
+    #[schema(example = 900, minimum = 1)]
     pub expires_in: i64,
 }
 
+/// User login credentials
 #[derive(Debug, Deserialize, ToSchema)]
 pub struct LoginRequest {
-    #[schema(example = "user@example.com")]
+    /// Registered email address
+    #[schema(example = "user@example.com", format = "email")]
     pub email: String,
+    /// Account password
     #[schema(example = "securepassword123")]
     pub password: String,
 }

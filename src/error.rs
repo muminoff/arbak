@@ -7,10 +7,11 @@ use serde::Serialize;
 use serde_json::json;
 use utoipa::ToSchema;
 
-/// Standard error response
+/// Error response returned for all API errors. Contains a human-readable error message describing what went wrong.
 #[derive(Debug, Serialize, ToSchema)]
 pub struct ErrorResponse {
-    #[schema(example = "Error message here")]
+    /// Human-readable error message. May contain additional context for validation errors.
+    #[schema(example = "Resource not found")]
     pub error: String,
 }
 

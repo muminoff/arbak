@@ -24,13 +24,24 @@ use crate::{
 #[openapi(
     info(
         title = "Arbak API",
-        description = "RBAC with PostgreSQL Row-Level Security",
+        description = "A Role-Based Access Control (RBAC) API using PostgreSQL Row-Level Security (RLS) for database-level authorization. \
+                       All protected endpoints require a valid JWT token in the Authorization header (Bearer scheme). \
+                       Document visibility is automatically enforced by RLS policies - users can only access documents they own, \
+                       have been shared with, or are marked as public.",
         version = "0.1.0",
+        contact(
+            name = "Arbak Team",
+            email = "team@arbak.dev"
+        ),
         license(name = "Proprietary"),
     ),
     tags(
-        (name = "auth", description = "Authentication endpoints"),
-        (name = "documents", description = "Document management endpoints")
+        (name = "auth", description = "User authentication and session management. Register and login endpoints are public. \
+                                        All other endpoints require a valid JWT token in the Authorization header as 'Bearer <token>'. \
+                                        Tokens expire after 15 minutes and can be refreshed using the refresh endpoint."),
+        (name = "documents", description = "Document CRUD operations with Row-Level Security. Access is automatically controlled at the database level - \
+                                             users see only documents they own, have explicit access to via sharing, or are marked public. \
+                                             Admins with 'document:manage' permission can access all documents.")
     ),
     paths(
         register,

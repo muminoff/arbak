@@ -14,27 +14,32 @@ use crate::{
     AppState,
 };
 
-/// Response wrapper for document list
+/// Paginated list of documents accessible to the current user
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct DocumentListResponse {
+    /// Array of documents the user can access (owned, shared, or public)
     pub data: Vec<Document>,
 }
 
-/// Response wrapper for single document
+/// Single document with full details
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct DocumentResponse {
+    /// Document object with all fields
     pub data: Document,
 }
 
-/// Response wrapper for document access
+/// Document sharing permission details
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct DocumentAccessResponse {
+    /// Access grant details including permissions
     pub data: DocumentAccess,
 }
 
-/// Response for delete operation
+/// Confirmation of successful deletion
 #[derive(serde::Serialize, utoipa::ToSchema)]
 pub struct DeleteResponse {
+    /// Success message confirming the operation
+    #[schema(example = "Document deleted")]
     pub message: String,
 }
 
@@ -42,10 +47,14 @@ pub struct DeleteResponse {
     get,
     path = "/api/documents",
     tag = "documents",
+    operation_id = "listDocuments",
+    summary = "List accessible documents",
+    description = "Returns all documents the authenticated user can access. This includes documents they own, \
+                   documents shared with them, and public documents. Results are filtered by PostgreSQL RLS policies.",
     security(("bearer_auth" = [])),
     responses(
-        (status = 200, description = "List of accessible documents", body = DocumentListResponse),
-        (status = 401, description = "Not authenticated", body = ErrorResponse)
+        (status = 200, description = "Documents retrieved successfully. May be empty if user has no accessible documents.", body = DocumentListResponse),
+        (status = 401, description = "Missing or invalid authentication token", body = ErrorResponse)
     )
 )]
 async fn list_documents(
@@ -63,14 +72,18 @@ async fn list_documents(
     get,
     path = "/api/documents/{id}",
     tag = "documents",
+    operation_id = "getDocumentById",
+    summary = "Get document by ID",
+    description = "Retrieves a single document by its unique identifier. Returns 404 if the document doesn't exist \
+                   or if the user doesn't have permission to view it (RLS will hide inaccessible documents).",
     security(("bearer_auth" = [])),
     params(
-        ("id" = Uuid, Path, description = "Document ID")
+        ("id" = Uuid, Path, description = "Unique document identifier (UUID format, e.g., 550e8400-e29b-41d4-a716-446655440000)")
     ),
     responses(
-        (status = 200, description = "Document details", body = DocumentResponse),
-        (status = 401, description = "Not authenticated", body = ErrorResponse),
-        (status = 404, description = "Document not found", body = ErrorResponse)
+        (status = 200, description = "Document retrieved successfully", body = DocumentResponse),
+        (status = 401, description = "Missing or invalid authentication token", body = ErrorResponse),
+        (status = 404, description = "Document not found or not accessible to current user", body = ErrorResponse)
     )
 )]
 async fn get_document(
@@ -91,12 +104,19 @@ async fn get_document(
     post,
     path = "/api/documents",
     tag = "documents",
+    operation_id = "createDocument",
+    summary = "Create a new document",
+    description = "Creates a new document owned by the authenticated user. The document is private by default \
+                   unless is_public is set to true. Returns the created document with generated ID and timestamps.",
     security(("bearer_auth" = [])),
-    request_body = CreateDocument,
+    request_body(
+        description = "Document content and metadata",
+        content = CreateDocument
+    ),
     responses(
-        (status = 200, description = "Document created", body = DocumentResponse),
-        (status = 400, description = "Validation error", body = ErrorResponse),
-        (status = 401, description = "Not authenticated", body = ErrorResponse)
+        (status = 201, description = "Document created successfully with generated ID and timestamps", body = DocumentResponse),
+        (status = 400, description = "Validation error: title is required and cannot be empty", body = ErrorResponse),
+        (status = 401, description = "Missing or invalid authentication token", body = ErrorResponse)
     )
 )]
 async fn create_document(
@@ -126,15 +146,23 @@ async fn create_document(
     put,
     path = "/api/documents/{id}",
     tag = "documents",
+    operation_id = "updateDocument",
+    summary = "Update a document",
+    description = "Updates an existing document. Only the document owner or users with write access can update. \
+                   All fields are optional - only provided fields will be updated. Returns the updated document.",
     security(("bearer_auth" = [])),
     params(
-        ("id" = Uuid, Path, description = "Document ID")
+        ("id" = Uuid, Path, description = "Unique document identifier (UUID format)")
     ),
-    request_body = UpdateDocument,
+    request_body(
+        description = "Fields to update (all optional, only provided fields are modified)",
+        content = UpdateDocument
+    ),
     responses(
-        (status = 200, description = "Document updated", body = DocumentResponse),
-        (status = 401, description = "Not authenticated", body = ErrorResponse),
-        (status = 404, description = "Document not found", body = ErrorResponse)
+        (status = 200, description = "Document updated successfully", body = DocumentResponse),
+        (status = 401, description = "Missing or invalid authentication token", body = ErrorResponse),
+        (status = 403, description = "User does not have write permission for this document", body = ErrorResponse),
+        (status = 404, description = "Document not found or not accessible to current user", body = ErrorResponse)
     )
 )]
 async fn update_document(
@@ -162,14 +190,19 @@ async fn update_document(
     delete,
     path = "/api/documents/{id}",
     tag = "documents",
+    operation_id = "deleteDocument",
+    summary = "Delete a document",
+    description = "Permanently deletes a document. Only the document owner or admins with 'document:manage' permission \
+                   can delete documents. This action cannot be undone. All sharing permissions are also removed.",
     security(("bearer_auth" = [])),
     params(
-        ("id" = Uuid, Path, description = "Document ID")
+        ("id" = Uuid, Path, description = "Unique document identifier (UUID format)")
     ),
     responses(
-        (status = 200, description = "Document deleted", body = DeleteResponse),
-        (status = 401, description = "Not authenticated", body = ErrorResponse),
-        (status = 404, description = "Document not found", body = ErrorResponse)
+        (status = 200, description = "Document deleted successfully", body = DeleteResponse),
+        (status = 401, description = "Missing or invalid authentication token", body = ErrorResponse),
+        (status = 403, description = "User does not have permission to delete this document", body = ErrorResponse),
+        (status = 404, description = "Document not found or not accessible to current user", body = ErrorResponse)
     )
 )]
 async fn delete_document(
@@ -192,16 +225,24 @@ async fn delete_document(
     post,
     path = "/api/documents/{id}/share",
     tag = "documents",
+    operation_id = "shareDocument",
+    summary = "Share document with user",
+    description = "Grants another user access to a document. Only the document owner can share documents. \
+                   You can grant read-only or read-write access. Sharing with a user who already has access \
+                   will update their permissions.",
     security(("bearer_auth" = [])),
     params(
-        ("id" = Uuid, Path, description = "Document ID")
+        ("id" = Uuid, Path, description = "Unique document identifier (UUID format)")
     ),
-    request_body = ShareDocument,
+    request_body(
+        description = "User to share with and permission levels",
+        content = ShareDocument
+    ),
     responses(
-        (status = 200, description = "Document shared", body = DocumentAccessResponse),
-        (status = 401, description = "Not authenticated", body = ErrorResponse),
-        (status = 403, description = "Not document owner", body = ErrorResponse),
-        (status = 404, description = "Document not found", body = ErrorResponse)
+        (status = 200, description = "Document shared successfully. Returns the access grant details.", body = DocumentAccessResponse),
+        (status = 401, description = "Missing or invalid authentication token", body = ErrorResponse),
+        (status = 403, description = "Only the document owner can share documents", body = ErrorResponse),
+        (status = 404, description = "Document not found or target user does not exist", body = ErrorResponse)
     )
 )]
 async fn share_document(
