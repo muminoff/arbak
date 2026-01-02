@@ -42,22 +42,47 @@ async fn make_request(
     (status, json)
 }
 
-/// Helper to register a user and get their token
+/// Helper to register a user, verify email, and get their token
 async fn register_and_get_token(state: arbak::AppState) -> (String, arbak::AppState) {
     let app = arbak::routes::create_router(state.clone());
     let unique_email = format!("doctest_{}@example.com", uuid::Uuid::new_v4());
+    let password = "password123";
 
-    let (_, body) = make_request(
+    // Register the user
+    let (status, _) = make_request(
         app,
         "POST",
         "/api/auth/register",
         Some(json!({
             "email": unique_email,
-            "password": "password123"
+            "password": password
         })),
         None,
     )
     .await;
+    assert_eq!(status, StatusCode::OK, "Registration failed");
+
+    // Directly verify the email in the database (simulates clicking the verification link)
+    sqlx::query("UPDATE users SET email_verified = true WHERE email = $1")
+        .bind(&unique_email)
+        .execute(&state.pool)
+        .await
+        .expect("Failed to verify email");
+
+    // Login to get the token
+    let app = arbak::routes::create_router(state.clone());
+    let (status, body) = make_request(
+        app,
+        "POST",
+        "/api/auth/login",
+        Some(json!({
+            "email": unique_email,
+            "password": password
+        })),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Login failed: {:?}", body);
 
     let token = body["access_token"].as_str().unwrap().to_string();
     (token, state)
@@ -1227,22 +1252,47 @@ async fn test_delete_document_requires_auth() {
 // Share Document Tests
 // ============================================================================
 
-/// Helper to register a second user and get their ID and token
+/// Helper to register a second user, verify email, and get their ID and token
 async fn register_second_user(state: arbak::AppState) -> (String, uuid::Uuid, arbak::AppState) {
     let app = arbak::routes::create_router(state.clone());
     let unique_email = format!("second_user_{}@example.com", uuid::Uuid::new_v4());
+    let password = "password123";
 
-    let (_, body) = make_request(
+    // Register the user
+    let (status, _) = make_request(
         app,
         "POST",
         "/api/auth/register",
         Some(json!({
             "email": unique_email,
-            "password": "password123"
+            "password": password
         })),
         None,
     )
     .await;
+    assert_eq!(status, StatusCode::OK, "Second user registration failed");
+
+    // Directly verify the email in the database
+    sqlx::query("UPDATE users SET email_verified = true WHERE email = $1")
+        .bind(&unique_email)
+        .execute(&state.pool)
+        .await
+        .expect("Failed to verify second user email");
+
+    // Login to get the token
+    let app = arbak::routes::create_router(state.clone());
+    let (status, body) = make_request(
+        app,
+        "POST",
+        "/api/auth/login",
+        Some(json!({
+            "email": unique_email,
+            "password": password
+        })),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Second user login failed: {:?}", body);
 
     let token = body["access_token"].as_str().unwrap().to_string();
 

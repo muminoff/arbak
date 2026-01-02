@@ -10,8 +10,8 @@ use crate::{
     auth::{hash_password, AuthUser},
     error::{AppError, AppResult, ErrorResponse},
     models::{CreateUser, UserWithRoles},
-    repositories::{PasswordResetRepository, UserRepository},
-    services::{AuthResponse, AuthService, LoginRequest},
+    repositories::{EmailVerificationRepository, PasswordResetRepository, UserRepository},
+    services::{AuthResponse, AuthService, LoginRequest, RegisterResponse},
     AppState,
 };
 
@@ -22,14 +22,15 @@ use crate::{
     operation_id = "registerUser",
     summary = "Register a new user",
     description = "Creates a new user account with the provided email and password. \
-                   Automatically assigns the default 'user' role and returns a JWT token for immediate API access. \
+                   A verification email will be sent (logged to console in development). \
+                   User must verify their email before they can login. \
                    Password must be at least 8 characters.",
     request_body(
         description = "User registration credentials",
         content = CreateUser
     ),
     responses(
-        (status = 201, description = "User created successfully. Returns JWT token valid for 15 minutes.", body = AuthResponse),
+        (status = 200, description = "Registration successful. Verification email sent.", body = RegisterResponse),
         (status = 400, description = "Invalid input: email format incorrect or password too short (min 8 characters)", body = ErrorResponse),
         (status = 409, description = "Email address is already registered", body = ErrorResponse)
     )
@@ -37,15 +38,8 @@ use crate::{
 async fn register(
     State(state): State<AppState>,
     Json(input): Json<CreateUser>,
-) -> AppResult<Json<AuthResponse>> {
-    let response = AuthService::register(
-        &state.pool,
-        input,
-        &state.config.jwt_secret,
-        state.config.jwt_expiration_seconds,
-    )
-    .await?;
-
+) -> AppResult<Json<RegisterResponse>> {
+    let response = AuthService::register(&state.pool, input).await?;
     Ok(Json(response))
 }
 
@@ -56,13 +50,15 @@ async fn register(
     operation_id = "loginUser",
     summary = "Authenticate user",
     description = "Validates user credentials and returns a JWT token for API access. \
-                   The token should be included in subsequent requests as 'Authorization: Bearer <token>'.",
+                   The token should be included in subsequent requests as 'Authorization: Bearer <token>'. \
+                   User must have verified their email before logging in.",
     request_body(
         description = "User login credentials",
         content = LoginRequest
     ),
     responses(
         (status = 200, description = "Login successful. Returns JWT token valid for 15 minutes.", body = AuthResponse),
+        (status = 400, description = "Email not verified", body = ErrorResponse),
         (status = 401, description = "Invalid email or password, or user account is deactivated", body = ErrorResponse)
     )
 )]
@@ -140,6 +136,117 @@ async fn me(
         .ok_or(crate::error::AppError::NotFound)?;
 
     Ok(Json(serde_json::json!({ "data": user })))
+}
+
+// ============================================================================
+// Email Verification
+// ============================================================================
+
+/// Request body for email verification
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct VerifyEmailRequest {
+    /// The verification token received via email
+    #[schema(example = "abc123def456...")]
+    pub token: String,
+}
+
+/// Request body for resending verification email
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ResendVerificationRequest {
+    /// Email address to resend verification to
+    #[schema(example = "user@example.com", format = "email")]
+    pub email: String,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/auth/verify-email",
+    tag = "auth",
+    operation_id = "verifyEmail",
+    summary = "Verify email address",
+    description = "Verifies the user's email address using the token sent during registration. \
+                   After successful verification, the user can login.",
+    request_body(
+        description = "Email verification token",
+        content = VerifyEmailRequest
+    ),
+    responses(
+        (status = 200, description = "Email verified successfully", body = MessageResponse),
+        (status = 400, description = "Invalid or expired verification token", body = ErrorResponse)
+    )
+)]
+async fn verify_email(
+    State(state): State<AppState>,
+    Json(input): Json<VerifyEmailRequest>,
+) -> AppResult<Json<MessageResponse>> {
+    // Find valid token
+    let user_id = EmailVerificationRepository::find_valid_token(&state.pool, &input.token)
+        .await?
+        .ok_or_else(|| AppError::Validation("Invalid or expired verification token".to_string()))?;
+
+    // Mark email as verified
+    UserRepository::set_email_verified(&state.pool, user_id, true).await?;
+
+    // Invalidate all verification tokens for this user
+    EmailVerificationRepository::invalidate_user_tokens(&state.pool, user_id).await?;
+
+    tracing::info!("Email verified for user {}", user_id);
+
+    Ok(Json(MessageResponse {
+        message: "Email verified successfully. You can now login.".to_string(),
+    }))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/auth/resend-verification",
+    tag = "auth",
+    operation_id = "resendVerification",
+    summary = "Resend verification email",
+    description = "Resends the verification email to the specified address. \
+                   For security reasons, always returns success even if email is not registered. \
+                   The new token expires after 24 hours.",
+    request_body(
+        description = "Email address to resend verification to",
+        content = ResendVerificationRequest
+    ),
+    responses(
+        (status = 200, description = "Verification email sent (check console in development)", body = MessageResponse),
+        (status = 400, description = "Email already verified", body = ErrorResponse)
+    )
+)]
+async fn resend_verification(
+    State(state): State<AppState>,
+    Json(input): Json<ResendVerificationRequest>,
+) -> AppResult<Json<MessageResponse>> {
+    // Always return success to prevent email enumeration
+    let response = MessageResponse {
+        message: "If the email exists and is not verified, a verification link has been sent"
+            .to_string(),
+    };
+
+    // Check if user exists
+    let user = UserRepository::find_by_email(&state.pool, &input.email).await?;
+
+    if let Some(user) = user {
+        // Check if already verified
+        if user.email_verified {
+            return Err(AppError::Validation("Email is already verified".to_string()));
+        }
+
+        // Generate new verification token
+        let token = EmailVerificationRepository::create_token(&state.pool, user.id).await?;
+
+        // Log the verification link (in production, this would send an email)
+        let verification_link = format!("http://localhost:3000/verify-email?token={}", token);
+        tracing::info!(
+            "Email verification resent for {}: {}",
+            input.email,
+            verification_link
+        );
+    }
+
+    Ok(Json(response))
 }
 
 // ============================================================================
@@ -276,6 +383,8 @@ pub fn auth_routes() -> (Router<AppState>, Router<AppState>) {
     let public = Router::new()
         .route("/register", post(register))
         .route("/login", post(login))
+        .route("/verify-email", post(verify_email))
+        .route("/resend-verification", post(resend_verification))
         .route("/forgot-password", post(forgot_password))
         .route("/reset-password", post(reset_password));
 

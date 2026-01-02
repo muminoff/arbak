@@ -1,3 +1,3 @@
 mod auth_service;
 
-pub use auth_service::{AuthResponse, AuthService, LoginRequest};
+pub use auth_service::{AuthResponse, AuthService, LoginRequest, RegisterResponse};

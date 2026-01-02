@@ -7,7 +7,7 @@ use crate::{
     auth::{encode_token, hash_password, verify_password, Claims},
     error::{AppError, AppResult},
     models::CreateUser,
-    repositories::{RoleRepository, UserRepository},
+    repositories::{EmailVerificationRepository, RoleRepository, UserRepository},
 };
 
 /// Authentication response containing JWT access token
@@ -35,16 +35,19 @@ pub struct LoginRequest {
     pub password: String,
 }
 
+/// Registration response
+#[derive(Debug, Serialize, ToSchema)]
+pub struct RegisterResponse {
+    /// Success message
+    #[schema(example = "Registration successful. Please check your email to verify your account.")]
+    pub message: String,
+}
+
 pub struct AuthService;
 
 impl AuthService {
     /// Register a new user.
-    pub async fn register(
-        pool: &PgPool,
-        input: CreateUser,
-        jwt_secret: &str,
-        jwt_expiration: i64,
-    ) -> AppResult<AuthResponse> {
+    pub async fn register(pool: &PgPool, input: CreateUser) -> AppResult<RegisterResponse> {
         // Check if email already exists
         if UserRepository::find_by_email(pool, &input.email)
             .await?
@@ -65,7 +68,7 @@ impl AuthService {
             ));
         }
 
-        // Hash password and create user
+        // Hash password and create user (email_verified defaults to false)
         let password_hash = hash_password(&input.password)?;
         let user = UserRepository::create(pool, &input.email, &password_hash).await?;
 
@@ -74,15 +77,20 @@ impl AuthService {
             UserRepository::assign_role(pool, user.id, role.id).await?;
         }
 
-        // Get roles and generate token
-        let roles = UserRepository::get_user_roles(pool, user.id).await?;
-        let claims = Claims::new(user.id, user.email, roles, jwt_expiration);
-        let token = encode_token(&claims, jwt_secret)?;
+        // Generate email verification token
+        let token = EmailVerificationRepository::create_token(pool, user.id).await?;
 
-        Ok(AuthResponse {
-            access_token: token,
-            token_type: "Bearer".to_string(),
-            expires_in: jwt_expiration,
+        // Log the verification link (in production, this would send an email)
+        let verification_link = format!("http://localhost:3000/verify-email?token={}", token);
+        tracing::info!(
+            "Email verification requested for {}: {}",
+            input.email,
+            verification_link
+        );
+
+        Ok(RegisterResponse {
+            message: "Registration successful. Please check your email to verify your account."
+                .to_string(),
         })
     }
 
@@ -101,6 +109,13 @@ impl AuthService {
         // Verify user is active
         if !user.is_active {
             return Err(AppError::Unauthorized);
+        }
+
+        // Verify email is verified
+        if !user.email_verified {
+            return Err(AppError::Validation(
+                "Please verify your email before logging in".to_string(),
+            ));
         }
 
         // Verify password

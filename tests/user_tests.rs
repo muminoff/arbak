@@ -45,17 +45,43 @@ async fn make_request(
 async fn register_and_get_token(state: arbak::AppState) -> (String, uuid::Uuid, arbak::AppState) {
     let app = arbak::routes::create_router(state.clone());
     let unique_email = format!("test_{}@example.com", uuid::Uuid::new_v4());
-    let (_, body) = make_request(
+    let password = "password123";
+
+    // Register the user
+    let (status, _) = make_request(
         app,
         "POST",
         "/api/auth/register",
         Some(json!({
             "email": unique_email,
-            "password": "password123"
+            "password": password
         })),
         None,
     )
     .await;
+    assert_eq!(status, StatusCode::OK, "Registration failed");
+
+    // Directly verify the email in the database
+    sqlx::query("UPDATE users SET email_verified = true WHERE email = $1")
+        .bind(&unique_email)
+        .execute(&state.pool)
+        .await
+        .expect("Failed to verify email");
+
+    // Login to get the token
+    let app = arbak::routes::create_router(state.clone());
+    let (status, body) = make_request(
+        app,
+        "POST",
+        "/api/auth/login",
+        Some(json!({
+            "email": unique_email,
+            "password": password
+        })),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Login failed: {:?}", body);
 
     let token = body["access_token"].as_str().unwrap().to_string();
 
@@ -70,17 +96,43 @@ async fn register_and_get_token(state: arbak::AppState) -> (String, uuid::Uuid, 
 async fn register_admin_user(state: arbak::AppState) -> (String, uuid::Uuid, arbak::AppState) {
     let app = arbak::routes::create_router(state.clone());
     let unique_email = format!("admin_{}@example.com", uuid::Uuid::new_v4());
-    let (_, body) = make_request(
+    let password = "password123";
+
+    // Register the user
+    let (status, _) = make_request(
         app,
         "POST",
         "/api/auth/register",
         Some(json!({
             "email": unique_email,
-            "password": "password123"
+            "password": password
         })),
         None,
     )
     .await;
+    assert_eq!(status, StatusCode::OK, "Admin registration failed");
+
+    // Directly verify the email in the database
+    sqlx::query("UPDATE users SET email_verified = true WHERE email = $1")
+        .bind(&unique_email)
+        .execute(&state.pool)
+        .await
+        .expect("Failed to verify admin email");
+
+    // Login to get the token
+    let app = arbak::routes::create_router(state.clone());
+    let (status, body) = make_request(
+        app,
+        "POST",
+        "/api/auth/login",
+        Some(json!({
+            "email": unique_email,
+            "password": password
+        })),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK, "Admin login failed: {:?}", body);
 
     let token = body["access_token"].as_str().unwrap().to_string();
 

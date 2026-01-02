@@ -42,6 +42,66 @@ async fn make_request(
     (status, json)
 }
 
+/// Helper to register a user and verify their email (for tests that need a verified user)
+async fn register_and_verify_user(
+    pool: &sqlx::PgPool,
+    state: arbak::AppState,
+    email: &str,
+    password: &str,
+) -> (String, arbak::AppState) {
+    let app = arbak::routes::create_router(state.clone());
+
+    // Register
+    let (status, _) = make_request(
+        app,
+        "POST",
+        "/api/auth/register",
+        Some(json!({
+            "email": email,
+            "password": password
+        })),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Get user ID and create verification token directly
+    let user = sqlx::query_as::<_, (uuid::Uuid,)>("SELECT id FROM users WHERE email = $1")
+        .bind(email)
+        .fetch_one(pool)
+        .await
+        .unwrap();
+
+    // Verify email directly in database
+    sqlx::query("UPDATE users SET email_verified = true WHERE id = $1")
+        .bind(user.0)
+        .execute(pool)
+        .await
+        .unwrap();
+
+    // Now login to get the token
+    let app2 = arbak::routes::create_router(state.clone());
+    let (status, body) = make_request(
+        app2,
+        "POST",
+        "/api/auth/login",
+        Some(json!({
+            "email": email,
+            "password": password
+        })),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    let token = body["access_token"].as_str().unwrap().to_string();
+    (token, state)
+}
+
+// ============================================================================
+// Registration Tests
+// ============================================================================
+
 #[tokio::test]
 async fn test_register_success() {
     let pool = setup_test_db().await;
@@ -62,8 +122,7 @@ async fn test_register_success() {
     .await;
 
     assert_eq!(status, StatusCode::OK);
-    assert!(body["access_token"].is_string());
-    assert_eq!(body["token_type"], "Bearer");
+    assert!(body["message"].as_str().unwrap().contains("verify"));
 }
 
 #[tokio::test]
@@ -105,15 +164,19 @@ async fn test_register_duplicate_email() {
     assert!(body["error"].as_str().unwrap().contains("already registered"));
 }
 
+// ============================================================================
+// Email Verification Tests
+// ============================================================================
+
 #[tokio::test]
-async fn test_login_success() {
+async fn test_verify_email_success() {
     let pool = setup_test_db().await;
-    let state = create_test_state(pool);
+    let state = create_test_state(pool.clone());
     let app = arbak::routes::create_router(state.clone());
 
-    let unique_email = format!("login_{}@example.com", uuid::Uuid::new_v4());
+    let unique_email = format!("verify_{}@example.com", uuid::Uuid::new_v4());
 
-    // Register first
+    // Register
     make_request(
         app,
         "POST",
@@ -126,10 +189,247 @@ async fn test_login_success() {
     )
     .await;
 
-    // Then login
+    // Get user and create verification token
+    let user = sqlx::query_as::<_, (uuid::Uuid,)>("SELECT id FROM users WHERE email = $1")
+        .bind(&unique_email)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let token = arbak::repositories::EmailVerificationRepository::create_token(&pool, user.0)
+        .await
+        .unwrap();
+
+    // Verify email
     let app2 = arbak::routes::create_router(state);
     let (status, body) = make_request(
         app2,
+        "POST",
+        "/api/auth/verify-email",
+        Some(json!({ "token": token })),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["message"].as_str().unwrap().contains("verified"));
+}
+
+#[tokio::test]
+async fn test_verify_email_invalid_token() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let app = arbak::routes::create_router(state);
+
+    let (status, body) = make_request(
+        app,
+        "POST",
+        "/api/auth/verify-email",
+        Some(json!({ "token": "invalid_token_12345" })),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("Invalid or expired"));
+}
+
+#[tokio::test]
+async fn test_verify_email_token_cannot_be_reused() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool.clone());
+    let app = arbak::routes::create_router(state.clone());
+
+    let unique_email = format!("reuse_{}@example.com", uuid::Uuid::new_v4());
+
+    // Register
+    make_request(
+        app,
+        "POST",
+        "/api/auth/register",
+        Some(json!({
+            "email": &unique_email,
+            "password": "password123"
+        })),
+        None,
+    )
+    .await;
+
+    // Get user and create verification token
+    let user = sqlx::query_as::<_, (uuid::Uuid,)>("SELECT id FROM users WHERE email = $1")
+        .bind(&unique_email)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    let token = arbak::repositories::EmailVerificationRepository::create_token(&pool, user.0)
+        .await
+        .unwrap();
+
+    // First verification should succeed
+    let app2 = arbak::routes::create_router(state.clone());
+    let (status, _) = make_request(
+        app2,
+        "POST",
+        "/api/auth/verify-email",
+        Some(json!({ "token": &token })),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Second verification with same token should fail
+    let app3 = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app3,
+        "POST",
+        "/api/auth/verify-email",
+        Some(json!({ "token": &token })),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("Invalid or expired"));
+}
+
+#[tokio::test]
+async fn test_resend_verification_success() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool.clone());
+    let app = arbak::routes::create_router(state.clone());
+
+    let unique_email = format!("resend_{}@example.com", uuid::Uuid::new_v4());
+
+    // Register
+    make_request(
+        app,
+        "POST",
+        "/api/auth/register",
+        Some(json!({
+            "email": &unique_email,
+            "password": "password123"
+        })),
+        None,
+    )
+    .await;
+
+    // Resend verification
+    let app2 = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app2,
+        "POST",
+        "/api/auth/resend-verification",
+        Some(json!({ "email": &unique_email })),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["message"].as_str().unwrap().contains("verification link"));
+}
+
+#[tokio::test]
+async fn test_resend_verification_already_verified() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool.clone());
+
+    let unique_email = format!("alreadyverified_{}@example.com", uuid::Uuid::new_v4());
+
+    // Register and verify user
+    register_and_verify_user(&pool, state.clone(), &unique_email, "password123").await;
+
+    // Try to resend verification
+    let app = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app,
+        "POST",
+        "/api/auth/resend-verification",
+        Some(json!({ "email": &unique_email })),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("already verified"));
+}
+
+#[tokio::test]
+async fn test_resend_verification_nonexistent_email() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let app = arbak::routes::create_router(state);
+
+    // Resend verification for non-existent email (should return success to prevent enumeration)
+    let (status, body) = make_request(
+        app,
+        "POST",
+        "/api/auth/resend-verification",
+        Some(json!({ "email": "nonexistent@example.com" })),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["message"].as_str().unwrap().contains("verification link"));
+}
+
+// ============================================================================
+// Login Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_login_requires_verified_email() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let app = arbak::routes::create_router(state.clone());
+
+    let unique_email = format!("unverified_{}@example.com", uuid::Uuid::new_v4());
+
+    // Register (email not verified)
+    make_request(
+        app,
+        "POST",
+        "/api/auth/register",
+        Some(json!({
+            "email": &unique_email,
+            "password": "password123"
+        })),
+        None,
+    )
+    .await;
+
+    // Try to login without verification
+    let app2 = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app2,
+        "POST",
+        "/api/auth/login",
+        Some(json!({
+            "email": &unique_email,
+            "password": "password123"
+        })),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("verify your email"));
+}
+
+#[tokio::test]
+async fn test_login_success() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool.clone());
+
+    let unique_email = format!("login_{}@example.com", uuid::Uuid::new_v4());
+
+    // Register and verify
+    register_and_verify_user(&pool, state.clone(), &unique_email, "password123").await;
+
+    // Login should work
+    let app = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app,
         "POST",
         "/api/auth/login",
         Some(json!({
@@ -147,28 +447,17 @@ async fn test_login_success() {
 #[tokio::test]
 async fn test_login_wrong_password() {
     let pool = setup_test_db().await;
-    let state = create_test_state(pool);
-    let app = arbak::routes::create_router(state.clone());
+    let state = create_test_state(pool.clone());
 
     let unique_email = format!("wrongpw_{}@example.com", uuid::Uuid::new_v4());
 
-    // Register
-    make_request(
-        app,
-        "POST",
-        "/api/auth/register",
-        Some(json!({
-            "email": &unique_email,
-            "password": "password123"
-        })),
-        None,
-    )
-    .await;
+    // Register and verify
+    register_and_verify_user(&pool, state.clone(), &unique_email, "password123").await;
 
     // Login with wrong password
-    let app2 = arbak::routes::create_router(state);
+    let app = arbak::routes::create_router(state);
     let (status, _) = make_request(
-        app2,
+        app,
         "POST",
         "/api/auth/login",
         Some(json!({
@@ -181,6 +470,10 @@ async fn test_login_wrong_password() {
 
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
+
+// ============================================================================
+// Me Endpoint Tests
+// ============================================================================
 
 #[tokio::test]
 async fn test_me_requires_auth() {
@@ -196,32 +489,21 @@ async fn test_me_requires_auth() {
 #[tokio::test]
 async fn test_me_with_valid_token() {
     let pool = setup_test_db().await;
-    let state = create_test_state(pool);
-    let app = arbak::routes::create_router(state.clone());
+    let state = create_test_state(pool.clone());
 
     let unique_email = format!("me_{}@example.com", uuid::Uuid::new_v4());
 
-    // Register
-    let (_, body) = make_request(
-        app,
-        "POST",
-        "/api/auth/register",
-        Some(json!({
-            "email": &unique_email,
-            "password": "password123"
-        })),
-        None,
-    )
-    .await;
-
-    let token = body["access_token"].as_str().unwrap();
+    // Register and verify
+    let (token, state) =
+        register_and_verify_user(&pool, state, &unique_email, "password123").await;
 
     // Get /me
-    let app2 = arbak::routes::create_router(state);
-    let (status, body) = make_request(app2, "GET", "/api/auth/me", None, Some(token)).await;
+    let app = arbak::routes::create_router(state);
+    let (status, body) = make_request(app, "GET", "/api/auth/me", None, Some(&token)).await;
 
     assert_eq!(status, StatusCode::OK);
     assert_eq!(body["data"]["email"], unique_email);
+    assert_eq!(body["data"]["email_verified"], true);
 }
 
 // ============================================================================
@@ -252,7 +534,7 @@ async fn test_forgot_password_always_returns_success() {
 #[tokio::test]
 async fn test_forgot_password_for_existing_user() {
     let pool = setup_test_db().await;
-    let state = create_test_state(pool);
+    let state = create_test_state(pool.clone());
     let app = arbak::routes::create_router(state.clone());
 
     let unique_email = format!("reset_{}@example.com", uuid::Uuid::new_v4());
@@ -351,13 +633,18 @@ async fn test_reset_password_full_flow() {
     .await;
 
     // 2. Get user ID from database
-    let user = sqlx::query_as::<_, (uuid::Uuid,)>(
-        "SELECT id FROM users WHERE email = $1"
-    )
-    .bind(&unique_email)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let user = sqlx::query_as::<_, (uuid::Uuid,)>("SELECT id FROM users WHERE email = $1")
+        .bind(&unique_email)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+
+    // 2.5. Verify email so we can test login later
+    sqlx::query("UPDATE users SET email_verified = true WHERE id = $1")
+        .bind(user.0)
+        .execute(&pool)
+        .await
+        .unwrap();
 
     // 3. Create a reset token directly in database for testing
     let token = arbak::repositories::PasswordResetRepository::create_token(&pool, user.0)
@@ -434,13 +721,11 @@ async fn test_reset_password_token_cannot_be_reused() {
     .await;
 
     // Get user ID
-    let user = sqlx::query_as::<_, (uuid::Uuid,)>(
-        "SELECT id FROM users WHERE email = $1"
-    )
-    .bind(&unique_email)
-    .fetch_one(&pool)
-    .await
-    .unwrap();
+    let user = sqlx::query_as::<_, (uuid::Uuid,)>("SELECT id FROM users WHERE email = $1")
+        .bind(&unique_email)
+        .fetch_one(&pool)
+        .await
+        .unwrap();
 
     // Create a reset token
     let token = arbak::repositories::PasswordResetRepository::create_token(&pool, user.0)

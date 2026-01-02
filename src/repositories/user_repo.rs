@@ -13,7 +13,7 @@ impl UserRepository {
     pub async fn find_by_email(pool: &PgPool, email: &str) -> AppResult<Option<User>> {
         let user = sqlx::query_as::<_, User>(
             r#"
-            SELECT id, email, password_hash, is_active, created_at, updated_at
+            SELECT id, email, password_hash, is_active, email_verified, created_at, updated_at
             FROM users
             WHERE email = $1
             "#,
@@ -29,7 +29,7 @@ impl UserRepository {
     pub async fn find_by_id(pool: &PgPool, id: Uuid) -> AppResult<Option<User>> {
         let user = sqlx::query_as::<_, User>(
             r#"
-            SELECT id, email, password_hash, is_active, created_at, updated_at
+            SELECT id, email, password_hash, is_active, email_verified, created_at, updated_at
             FROM users
             WHERE id = $1
             "#,
@@ -47,7 +47,7 @@ impl UserRepository {
             r#"
             INSERT INTO users (email, password_hash)
             VALUES ($1, $2)
-            RETURNING id, email, password_hash, is_active, created_at, updated_at
+            RETURNING id, email, password_hash, is_active, email_verified, created_at, updated_at
             "#,
         )
         .bind(email)
@@ -56,6 +56,23 @@ impl UserRepository {
         .await?;
 
         Ok(user)
+    }
+
+    /// Set user email_verified status.
+    pub async fn set_email_verified(pool: &PgPool, id: Uuid, verified: bool) -> AppResult<()> {
+        sqlx::query(
+            r#"
+            UPDATE users
+            SET email_verified = $2, updated_at = NOW()
+            WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .bind(verified)
+        .execute(pool)
+        .await?;
+
+        Ok(())
     }
 
     /// Get all role names for a user.
@@ -118,6 +135,7 @@ impl UserRepository {
                     id: u.id,
                     email: u.email,
                     is_active: u.is_active,
+                    email_verified: u.email_verified,
                     roles,
                     created_at: u.created_at,
                 }))
@@ -136,7 +154,7 @@ impl UserRepository {
     ) -> AppResult<Vec<User>> {
         let mut query = String::from(
             r#"
-            SELECT id, email, password_hash, is_active, created_at, updated_at
+            SELECT id, email, password_hash, is_active, email_verified, created_at, updated_at
             FROM users
             WHERE 1=1
             "#,
@@ -220,7 +238,7 @@ impl UserRepository {
             UPDATE users
             SET email = $2, updated_at = NOW()
             WHERE id = $1
-            RETURNING id, email, password_hash, is_active, created_at, updated_at
+            RETURNING id, email, password_hash, is_active, email_verified, created_at, updated_at
             "#,
         )
         .bind(id)
@@ -242,7 +260,7 @@ impl UserRepository {
             UPDATE users
             SET password_hash = $2, updated_at = NOW()
             WHERE id = $1
-            RETURNING id, email, password_hash, is_active, created_at, updated_at
+            RETURNING id, email, password_hash, is_active, email_verified, created_at, updated_at
             "#,
         )
         .bind(id)
@@ -260,7 +278,7 @@ impl UserRepository {
             UPDATE users
             SET is_active = $2, updated_at = NOW()
             WHERE id = $1
-            RETURNING id, email, password_hash, is_active, created_at, updated_at
+            RETURNING id, email, password_hash, is_active, email_verified, created_at, updated_at
             "#,
         )
         .bind(id)

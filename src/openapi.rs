@@ -8,8 +8,9 @@ use crate::{
     handlers::{
         auth_handlers::{
             __path_forgot_password, __path_login, __path_me, __path_refresh, __path_register,
-            __path_reset_password, ForgotPasswordRequest, MessageResponse, ResetPasswordRequest,
-            UserResponse,
+            __path_resend_verification, __path_reset_password, __path_verify_email,
+            ForgotPasswordRequest, MessageResponse, ResendVerificationRequest, ResetPasswordRequest,
+            UserResponse, VerifyEmailRequest,
         },
         document_handlers::{
             __path_create_document, __path_delete_document, __path_get_document,
@@ -35,7 +36,7 @@ use crate::{
         PaginationMeta, Permission, PermissionAction, Role, ShareDocument, UpdateDocument,
         UpdateRole, UpdateUser, User, UserRolesResponse, UserWithRoles,
     },
-    services::{AuthResponse, LoginRequest},
+    services::{AuthResponse, LoginRequest, RegisterResponse},
 };
 
 #[derive(OpenApi)]
@@ -54,8 +55,8 @@ use crate::{
         license(name = "Proprietary"),
     ),
     tags(
-        (name = "auth", description = "User authentication and session management. Register and login endpoints are public. \
-                                        All other endpoints require a valid JWT token in the Authorization header as 'Bearer <token>'. \
+        (name = "auth", description = "User authentication and session management. Register, login, email verification, and password reset endpoints are public. \
+                                        New users must verify their email before logging in. \
                                         Tokens expire after 15 minutes and can be refreshed using the refresh endpoint."),
         (name = "users", description = "User management operations. Users can view and update their own profile. \
                                          Admins can list all users, activate/deactivate accounts, and delete users. \
@@ -73,6 +74,8 @@ use crate::{
         // Auth
         register,
         login,
+        verify_email,
+        resend_verification,
         refresh,
         me,
         forgot_password,
@@ -113,8 +116,11 @@ use crate::{
             CreateUser,
             LoginRequest,
             AuthResponse,
+            RegisterResponse,
             UserWithRoles,
             UserResponse,
+            VerifyEmailRequest,
+            ResendVerificationRequest,
             ForgotPasswordRequest,
             ResetPasswordRequest,
             MessageResponse,

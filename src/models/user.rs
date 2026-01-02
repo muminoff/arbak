@@ -18,6 +18,9 @@ pub struct User {
     /// Whether the user account is active. Inactive users cannot login.
     #[schema(example = true)]
     pub is_active: bool,
+    /// Whether the user's email has been verified
+    #[schema(example = true)]
+    pub email_verified: bool,
     /// Timestamp when the account was created
     pub created_at: DateTime<Utc>,
     /// Timestamp when the account was last modified
@@ -47,6 +50,9 @@ pub struct UserWithRoles {
     /// Whether the user account is active
     #[schema(example = true)]
     pub is_active: bool,
+    /// Whether the user's email has been verified
+    #[schema(example = true)]
+    pub email_verified: bool,
     /// List of role names assigned to the user
     #[schema(example = json!(["user", "admin"]))]
     pub roles: Vec<String>,
