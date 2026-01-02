@@ -9,6 +9,14 @@ A minimal Role-Based Access Control (RBAC) system using PostgreSQL Row-Level Sec
 - PostgreSQL RLS for automatic row filtering
 - Role-based permissions
 - Document sharing between users
+- OpenAPI 3.0 spec with Swagger UI
+
+## API Documentation
+
+Once the server is running, access the interactive API documentation:
+
+- **Swagger UI**: http://localhost:3000/swagger-ui
+- **OpenAPI JSON**: http://localhost:3000/api-docs/openapi.json
 
 ## Quick Start
 
