@@ -12,10 +12,19 @@ use crate::{
             __path_list_documents, __path_share_document, __path_update_document,
             DeleteResponse, DocumentAccessResponse, DocumentListResponse, DocumentResponse,
         },
+        role_handlers::{
+            __path_add_permission_to_role, __path_assign_role_to_user, __path_create_role,
+            __path_delete_role, __path_get_role, __path_get_role_permissions, __path_get_user_roles,
+            __path_list_permissions, __path_list_roles, __path_remove_permission_from_role,
+            __path_remove_role_from_user, __path_update_role, AddPermissionToRole,
+            PermissionListResponse, RoleAssignmentResponse, RoleDeleteResponse, RoleListResponse,
+            RoleResponse, UserRolesDataResponse,
+        },
     },
     models::{
-        CreateDocument, CreateUser, Document, DocumentAccess, PaginationMeta, ShareDocument,
-        UpdateDocument, UserWithRoles,
+        AssignRole, CreateDocument, CreateRole, CreateUser, Document, DocumentAccess,
+        PaginationMeta, Permission, PermissionAction, Role, ShareDocument, UpdateDocument,
+        UpdateRole, UserRolesResponse, UserWithRoles,
     },
     services::{AuthResponse, LoginRequest},
 };
@@ -41,19 +50,41 @@ use crate::{
                                         Tokens expire after 15 minutes and can be refreshed using the refresh endpoint."),
         (name = "documents", description = "Document CRUD operations with Row-Level Security. Access is automatically controlled at the database level - \
                                              users see only documents they own, have explicit access to via sharing, or are marked public. \
-                                             Admins with 'document:manage' permission can access all documents.")
+                                             Admins with 'document:manage' permission can access all documents."),
+        (name = "roles", description = "Role management operations. Roles are used to group permissions and can be assigned to users. \
+                                         Most operations require admin privileges. List and get operations are available to all authenticated users."),
+        (name = "permissions", description = "Permission management operations. Permissions define what actions can be performed on resources. \
+                                               Permissions are assigned to roles, and roles are assigned to users. \
+                                               Admin privileges required for modification operations.")
     ),
     paths(
+        // Auth
         register,
         login,
         refresh,
         me,
+        // Documents
         list_documents,
         get_document,
         create_document,
         update_document,
         delete_document,
         share_document,
+        // Roles
+        list_roles,
+        get_role,
+        create_role,
+        update_role,
+        delete_role,
+        // User roles
+        get_user_roles,
+        assign_role_to_user,
+        remove_role_from_user,
+        // Permissions
+        list_permissions,
+        get_role_permissions,
+        add_permission_to_role,
+        remove_permission_from_role,
     ),
     components(
         schemas(
@@ -73,6 +104,22 @@ use crate::{
             DocumentResponse,
             DocumentAccessResponse,
             DeleteResponse,
+            // Roles
+            Role,
+            CreateRole,
+            UpdateRole,
+            AssignRole,
+            UserRolesResponse,
+            RoleListResponse,
+            RoleResponse,
+            RoleDeleteResponse,
+            RoleAssignmentResponse,
+            UserRolesDataResponse,
+            // Permissions
+            Permission,
+            PermissionAction,
+            PermissionListResponse,
+            AddPermissionToRole,
             // Pagination
             PaginationMeta,
             // Errors
