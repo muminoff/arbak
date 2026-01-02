@@ -9,84 +9,111 @@ use crate::{
 pub struct DocumentRepository;
 
 impl DocumentRepository {
-    /// Find all documents with pagination, search, and sorting (RLS will filter based on current user).
+    /// Find all documents with pagination, search, filters, and sorting (RLS will filter based on current user).
     /// Note: sort_column and sort_direction must be pre-validated to prevent SQL injection.
     pub async fn find_all(
         tx: &mut Transaction<'_, Postgres>,
         limit: i64,
         offset: i64,
         search: Option<&str>,
+        is_public: Option<bool>,
         sort_column: &str,
         sort_direction: &str,
     ) -> AppResult<Vec<Document>> {
         let order_clause = format!("{} {}", sort_column, sort_direction);
 
-        let docs = match search {
-            Some(term) if !term.trim().is_empty() => {
-                let pattern = format!("%{}%", term.trim());
-                let query = format!(
-                    r#"
-                    SELECT id, title, content, owner_id, is_public, created_at, updated_at
-                    FROM documents
-                    WHERE title ILIKE $3 OR content ILIKE $3
-                    ORDER BY {}
-                    LIMIT $1 OFFSET $2
-                    "#,
-                    order_clause
-                );
-                sqlx::query_as::<_, Document>(&query)
-                    .bind(limit)
-                    .bind(offset)
-                    .bind(pattern)
-                    .fetch_all(&mut **tx)
-                    .await?
+        // Build WHERE conditions dynamically
+        let mut conditions: Vec<String> = Vec::new();
+        let mut param_idx = 3; // $1 = limit, $2 = offset
+
+        if let Some(term) = search {
+            if !term.trim().is_empty() {
+                conditions.push(format!("(title ILIKE ${} OR content ILIKE ${})", param_idx, param_idx));
+                param_idx += 1;
             }
-            _ => {
-                let query = format!(
-                    r#"
-                    SELECT id, title, content, owner_id, is_public, created_at, updated_at
-                    FROM documents
-                    ORDER BY {}
-                    LIMIT $1 OFFSET $2
-                    "#,
-                    order_clause
-                );
-                sqlx::query_as::<_, Document>(&query)
-                    .bind(limit)
-                    .bind(offset)
-                    .fetch_all(&mut **tx)
-                    .await?
-            }
+        }
+
+        if is_public.is_some() {
+            conditions.push(format!("is_public = ${}", param_idx));
+        }
+
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
         };
 
+        let query = format!(
+            r#"
+            SELECT id, title, content, owner_id, is_public, created_at, updated_at
+            FROM documents
+            {}
+            ORDER BY {}
+            LIMIT $1 OFFSET $2
+            "#,
+            where_clause, order_clause
+        );
+
+        let mut q = sqlx::query_as::<_, Document>(&query)
+            .bind(limit)
+            .bind(offset);
+
+        if let Some(term) = search {
+            if !term.trim().is_empty() {
+                q = q.bind(format!("%{}%", term.trim()));
+            }
+        }
+
+        if let Some(public) = is_public {
+            q = q.bind(public);
+        }
+
+        let docs = q.fetch_all(&mut **tx).await?;
         Ok(docs)
     }
 
-    /// Count total documents with optional search (RLS will filter based on current user).
-    pub async fn count(tx: &mut Transaction<'_, Postgres>, search: Option<&str>) -> AppResult<i64> {
-        let row: (i64,) = match search {
-            Some(term) if !term.trim().is_empty() => {
-                let pattern = format!("%{}%", term.trim());
-                sqlx::query_as(
-                    r#"
-                    SELECT COUNT(*) FROM documents
-                    WHERE title ILIKE $1 OR content ILIKE $1
-                    "#,
-                )
-                .bind(pattern)
-                .fetch_one(&mut **tx)
-                .await?
+    /// Count total documents with optional filters (RLS will filter based on current user).
+    pub async fn count(
+        tx: &mut Transaction<'_, Postgres>,
+        search: Option<&str>,
+        is_public: Option<bool>,
+    ) -> AppResult<i64> {
+        // Build WHERE conditions dynamically
+        let mut conditions: Vec<String> = Vec::new();
+        let mut param_idx = 1;
+
+        if let Some(term) = search {
+            if !term.trim().is_empty() {
+                conditions.push(format!("(title ILIKE ${} OR content ILIKE ${})", param_idx, param_idx));
+                param_idx += 1;
             }
-            _ => {
-                sqlx::query_as(
-                    r#"
-                    SELECT COUNT(*) FROM documents
-                    "#,
-                )
-                .fetch_one(&mut **tx)
-                .await?
-            }
+        }
+
+        if is_public.is_some() {
+            conditions.push(format!("is_public = ${}", param_idx));
+        }
+
+        let where_clause = if conditions.is_empty() {
+            String::new()
+        } else {
+            format!("WHERE {}", conditions.join(" AND "))
         };
+
+        let query = format!("SELECT COUNT(*) FROM documents {}", where_clause);
+
+        let mut q = sqlx::query_as::<_, (i64,)>(&query);
+
+        if let Some(term) = search {
+            if !term.trim().is_empty() {
+                q = q.bind(format!("%{}%", term.trim()));
+            }
+        }
+
+        if let Some(public) = is_public {
+            q = q.bind(public);
+        }
+
+        let row = q.fetch_one(&mut **tx).await?;
 
         Ok(row.0)
     }

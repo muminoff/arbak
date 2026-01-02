@@ -19,6 +19,10 @@ pub struct PaginationParams {
     #[param(example = "quarterly report")]
     pub search: Option<String>,
 
+    /// Filter by public/private visibility
+    #[param(example = true)]
+    pub is_public: Option<bool>,
+
     /// Field to sort by
     #[param(default = "created_at", example = "created_at")]
     #[serde(default = "default_sort_by")]

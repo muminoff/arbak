@@ -56,7 +56,8 @@ pub struct DeleteResponse {
     summary = "List accessible documents",
     description = "Returns a paginated list of documents the authenticated user can access. This includes documents \
                    they own, documents shared with them, and public documents. Results are filtered by PostgreSQL RLS policies. \
-                   Use 'search' to filter by title/content, 'sort_by' (created_at, updated_at, title) and 'sort_order' (asc, desc) for sorting.",
+                   Use 'search' to filter by title/content, 'is_public' to filter by visibility, \
+                   'sort_by' (created_at, updated_at, title) and 'sort_order' (asc, desc) for sorting.",
     security(("bearer_auth" = [])),
     params(PaginationParams),
     responses(
@@ -74,6 +75,7 @@ async fn list_documents(
     let limit = params.limit();
     let offset = params.offset();
     let search = params.search.as_deref();
+    let is_public = params.is_public;
     let sort_column = params.sort_column();
     let sort_direction = params.sort_direction();
 
@@ -82,11 +84,12 @@ async fn list_documents(
         limit,
         offset,
         search,
+        is_public,
         sort_column,
         sort_direction,
     )
     .await?;
-    let total_items = DocumentRepository::count(conn.executor(), search).await?;
+    let total_items = DocumentRepository::count(conn.executor(), search, is_public).await?;
     conn.commit().await?;
 
     Ok(Json(DocumentListResponse {
