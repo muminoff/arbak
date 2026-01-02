@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
@@ -22,6 +23,14 @@ pub struct PaginationParams {
     /// Filter by public/private visibility
     #[param(example = true)]
     pub is_public: Option<bool>,
+
+    /// Filter documents created on or after this date (ISO 8601 format)
+    #[param(value_type = String, example = "2024-01-01T00:00:00Z")]
+    pub created_from: Option<DateTime<Utc>>,
+
+    /// Filter documents created on or before this date (ISO 8601 format)
+    #[param(value_type = String, example = "2024-12-31T23:59:59Z")]
+    pub created_to: Option<DateTime<Utc>>,
 
     /// Field to sort by
     #[param(default = "created_at", example = "created_at")]

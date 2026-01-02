@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use sqlx::{Postgres, Transaction};
 use uuid::Uuid;
 
@@ -11,12 +12,15 @@ pub struct DocumentRepository;
 impl DocumentRepository {
     /// Find all documents with pagination, search, filters, and sorting (RLS will filter based on current user).
     /// Note: sort_column and sort_direction must be pre-validated to prevent SQL injection.
+    #[allow(clippy::too_many_arguments)]
     pub async fn find_all(
         tx: &mut Transaction<'_, Postgres>,
         limit: i64,
         offset: i64,
         search: Option<&str>,
         is_public: Option<bool>,
+        created_from: Option<DateTime<Utc>>,
+        created_to: Option<DateTime<Utc>>,
         sort_column: &str,
         sort_direction: &str,
     ) -> AppResult<Vec<Document>> {
@@ -35,6 +39,16 @@ impl DocumentRepository {
 
         if is_public.is_some() {
             conditions.push(format!("is_public = ${}", param_idx));
+            param_idx += 1;
+        }
+
+        if created_from.is_some() {
+            conditions.push(format!("created_at >= ${}", param_idx));
+            param_idx += 1;
+        }
+
+        if created_to.is_some() {
+            conditions.push(format!("created_at <= ${}", param_idx));
         }
 
         let where_clause = if conditions.is_empty() {
@@ -68,6 +82,14 @@ impl DocumentRepository {
             q = q.bind(public);
         }
 
+        if let Some(from) = created_from {
+            q = q.bind(from);
+        }
+
+        if let Some(to) = created_to {
+            q = q.bind(to);
+        }
+
         let docs = q.fetch_all(&mut **tx).await?;
         Ok(docs)
     }
@@ -77,6 +99,8 @@ impl DocumentRepository {
         tx: &mut Transaction<'_, Postgres>,
         search: Option<&str>,
         is_public: Option<bool>,
+        created_from: Option<DateTime<Utc>>,
+        created_to: Option<DateTime<Utc>>,
     ) -> AppResult<i64> {
         // Build WHERE conditions dynamically
         let mut conditions: Vec<String> = Vec::new();
@@ -91,6 +115,16 @@ impl DocumentRepository {
 
         if is_public.is_some() {
             conditions.push(format!("is_public = ${}", param_idx));
+            param_idx += 1;
+        }
+
+        if created_from.is_some() {
+            conditions.push(format!("created_at >= ${}", param_idx));
+            param_idx += 1;
+        }
+
+        if created_to.is_some() {
+            conditions.push(format!("created_at <= ${}", param_idx));
         }
 
         let where_clause = if conditions.is_empty() {
@@ -111,6 +145,14 @@ impl DocumentRepository {
 
         if let Some(public) = is_public {
             q = q.bind(public);
+        }
+
+        if let Some(from) = created_from {
+            q = q.bind(from);
+        }
+
+        if let Some(to) = created_to {
+            q = q.bind(to);
         }
 
         let row = q.fetch_one(&mut **tx).await?;
