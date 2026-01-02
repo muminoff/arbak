@@ -22,7 +22,7 @@ pub fn create_router(state: AppState) -> Router {
         .nest("/auth", auth_protected)
         .nest("/documents", handlers::document_routes())
         .nest("/roles", handlers::role_routes())
-        .nest("/users", handlers::user_role_routes())
+        .nest("/users", handlers::user_routes().merge(handlers::user_role_routes()))
         .nest("/permissions", handlers::permission_routes())
         .layer(middleware::from_fn_with_state(
             state.clone(),

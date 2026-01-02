@@ -53,3 +53,17 @@ pub struct UserWithRoles {
     /// Timestamp when the account was created
     pub created_at: DateTime<Utc>,
 }
+
+/// Request body for updating a user
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct UpdateUser {
+    /// New email address (optional)
+    #[schema(example = "newemail@example.com")]
+    pub email: Option<String>,
+    /// New password (optional, must be at least 8 characters if provided)
+    #[schema(example = "newsecurepassword123", min_length = 8)]
+    pub password: Option<String>,
+    /// Whether the account is active (optional)
+    #[schema(example = true)]
+    pub is_active: Option<bool>,
+}

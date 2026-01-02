@@ -20,11 +20,16 @@ use crate::{
             PermissionListResponse, RoleAssignmentResponse, RoleDeleteResponse, RoleListResponse,
             RoleResponse, UserRolesDataResponse,
         },
+        user_handlers::{
+            __path_activate_user, __path_deactivate_user, __path_delete_user, __path_get_user,
+            __path_list_users, __path_update_user, UserActionResponse, UserListResponse,
+            UserResponse as UserDataResponse,
+        },
     },
     models::{
         AssignRole, CreateDocument, CreateRole, CreateUser, Document, DocumentAccess,
         PaginationMeta, Permission, PermissionAction, Role, ShareDocument, UpdateDocument,
-        UpdateRole, UserRolesResponse, UserWithRoles,
+        UpdateRole, UpdateUser, User, UserRolesResponse, UserWithRoles,
     },
     services::{AuthResponse, LoginRequest},
 };
@@ -48,6 +53,9 @@ use crate::{
         (name = "auth", description = "User authentication and session management. Register and login endpoints are public. \
                                         All other endpoints require a valid JWT token in the Authorization header as 'Bearer <token>'. \
                                         Tokens expire after 15 minutes and can be refreshed using the refresh endpoint."),
+        (name = "users", description = "User management operations. Users can view and update their own profile. \
+                                         Admins can list all users, activate/deactivate accounts, and delete users. \
+                                         User roles are managed separately under the roles tag."),
         (name = "documents", description = "Document CRUD operations with Row-Level Security. Access is automatically controlled at the database level - \
                                              users see only documents they own, have explicit access to via sharing, or are marked public. \
                                              Admins with 'document:manage' permission can access all documents."),
@@ -63,6 +71,13 @@ use crate::{
         login,
         refresh,
         me,
+        // Users
+        list_users,
+        get_user,
+        update_user,
+        activate_user,
+        deactivate_user,
+        delete_user,
         // Documents
         list_documents,
         get_document,
@@ -94,6 +109,12 @@ use crate::{
             AuthResponse,
             UserWithRoles,
             UserResponse,
+            // Users
+            User,
+            UpdateUser,
+            UserListResponse,
+            UserDataResponse,
+            UserActionResponse,
             // Documents
             Document,
             DocumentAccess,

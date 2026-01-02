@@ -8,4 +8,4 @@ pub use document::{CreateDocument, Document, DocumentAccess, ShareDocument, Upda
 pub use pagination::{PaginationMeta, PaginationParams};
 pub use permission::{Permission, PermissionAction};
 pub use role::{AssignRole, CreateRole, Role, UpdateRole, UserRolesResponse};
-pub use user::{CreateUser, User, UserWithRoles};
+pub use user::{CreateUser, UpdateUser, User, UserWithRoles};

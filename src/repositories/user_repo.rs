@@ -125,4 +125,164 @@ impl UserRepository {
             None => Ok(None),
         }
     }
+
+    /// Get all users with pagination.
+    pub async fn find_all(
+        pool: &PgPool,
+        limit: i64,
+        offset: i64,
+        search: Option<&str>,
+        is_active: Option<bool>,
+    ) -> AppResult<Vec<User>> {
+        let mut query = String::from(
+            r#"
+            SELECT id, email, password_hash, is_active, created_at, updated_at
+            FROM users
+            WHERE 1=1
+            "#,
+        );
+
+        let mut param_count = 0;
+
+        if search.is_some() {
+            param_count += 1;
+            query.push_str(&format!(" AND email ILIKE ${}", param_count));
+        }
+
+        if is_active.is_some() {
+            param_count += 1;
+            query.push_str(&format!(" AND is_active = ${}", param_count));
+        }
+
+        param_count += 1;
+        let limit_param = param_count;
+        param_count += 1;
+        let offset_param = param_count;
+
+        query.push_str(&format!(
+            " ORDER BY created_at DESC LIMIT ${} OFFSET ${}",
+            limit_param, offset_param
+        ));
+
+        let mut db_query = sqlx::query_as::<_, User>(&query);
+
+        if let Some(s) = search {
+            db_query = db_query.bind(format!("%{}%", s));
+        }
+
+        if let Some(active) = is_active {
+            db_query = db_query.bind(active);
+        }
+
+        db_query = db_query.bind(limit).bind(offset);
+
+        let users = db_query.fetch_all(pool).await?;
+        Ok(users)
+    }
+
+    /// Count total users matching criteria.
+    pub async fn count(
+        pool: &PgPool,
+        search: Option<&str>,
+        is_active: Option<bool>,
+    ) -> AppResult<i64> {
+        let mut query = String::from("SELECT COUNT(*) FROM users WHERE 1=1");
+        let mut param_count = 0;
+
+        if search.is_some() {
+            param_count += 1;
+            query.push_str(&format!(" AND email ILIKE ${}", param_count));
+        }
+
+        if is_active.is_some() {
+            param_count += 1;
+            query.push_str(&format!(" AND is_active = ${}", param_count));
+        }
+
+        let mut db_query = sqlx::query_scalar::<_, i64>(&query);
+
+        if let Some(s) = search {
+            db_query = db_query.bind(format!("%{}%", s));
+        }
+
+        if let Some(active) = is_active {
+            db_query = db_query.bind(active);
+        }
+
+        let count = db_query.fetch_one(pool).await?;
+        Ok(count)
+    }
+
+    /// Update a user's email.
+    pub async fn update_email(pool: &PgPool, id: Uuid, email: &str) -> AppResult<Option<User>> {
+        let user = sqlx::query_as::<_, User>(
+            r#"
+            UPDATE users
+            SET email = $2, updated_at = NOW()
+            WHERE id = $1
+            RETURNING id, email, password_hash, is_active, created_at, updated_at
+            "#,
+        )
+        .bind(id)
+        .bind(email)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(user)
+    }
+
+    /// Update a user's password.
+    pub async fn update_password(
+        pool: &PgPool,
+        id: Uuid,
+        password_hash: &str,
+    ) -> AppResult<Option<User>> {
+        let user = sqlx::query_as::<_, User>(
+            r#"
+            UPDATE users
+            SET password_hash = $2, updated_at = NOW()
+            WHERE id = $1
+            RETURNING id, email, password_hash, is_active, created_at, updated_at
+            "#,
+        )
+        .bind(id)
+        .bind(password_hash)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(user)
+    }
+
+    /// Set user active status.
+    pub async fn set_active(pool: &PgPool, id: Uuid, is_active: bool) -> AppResult<Option<User>> {
+        let user = sqlx::query_as::<_, User>(
+            r#"
+            UPDATE users
+            SET is_active = $2, updated_at = NOW()
+            WHERE id = $1
+            RETURNING id, email, password_hash, is_active, created_at, updated_at
+            "#,
+        )
+        .bind(id)
+        .bind(is_active)
+        .fetch_optional(pool)
+        .await?;
+
+        Ok(user)
+    }
+
+    /// Delete a user (hard delete).
+    pub async fn delete(pool: &PgPool, id: Uuid) -> AppResult<bool> {
+        let result = sqlx::query(
+            r#"
+            DELETE FROM users
+            WHERE id = $1
+            "#,
+        )
+        .bind(id)
+        .execute(pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
 }
