@@ -9,44 +9,53 @@ use crate::{
 pub struct DocumentRepository;
 
 impl DocumentRepository {
-    /// Find all documents with pagination and optional search (RLS will filter based on current user).
+    /// Find all documents with pagination, search, and sorting (RLS will filter based on current user).
+    /// Note: sort_column and sort_direction must be pre-validated to prevent SQL injection.
     pub async fn find_all(
         tx: &mut Transaction<'_, Postgres>,
         limit: i64,
         offset: i64,
         search: Option<&str>,
+        sort_column: &str,
+        sort_direction: &str,
     ) -> AppResult<Vec<Document>> {
+        let order_clause = format!("{} {}", sort_column, sort_direction);
+
         let docs = match search {
             Some(term) if !term.trim().is_empty() => {
                 let pattern = format!("%{}%", term.trim());
-                sqlx::query_as::<_, Document>(
+                let query = format!(
                     r#"
                     SELECT id, title, content, owner_id, is_public, created_at, updated_at
                     FROM documents
                     WHERE title ILIKE $3 OR content ILIKE $3
-                    ORDER BY created_at DESC
+                    ORDER BY {}
                     LIMIT $1 OFFSET $2
                     "#,
-                )
-                .bind(limit)
-                .bind(offset)
-                .bind(pattern)
-                .fetch_all(&mut **tx)
-                .await?
+                    order_clause
+                );
+                sqlx::query_as::<_, Document>(&query)
+                    .bind(limit)
+                    .bind(offset)
+                    .bind(pattern)
+                    .fetch_all(&mut **tx)
+                    .await?
             }
             _ => {
-                sqlx::query_as::<_, Document>(
+                let query = format!(
                     r#"
                     SELECT id, title, content, owner_id, is_public, created_at, updated_at
                     FROM documents
-                    ORDER BY created_at DESC
+                    ORDER BY {}
                     LIMIT $1 OFFSET $2
                     "#,
-                )
-                .bind(limit)
-                .bind(offset)
-                .fetch_all(&mut **tx)
-                .await?
+                    order_clause
+                );
+                sqlx::query_as::<_, Document>(&query)
+                    .bind(limit)
+                    .bind(offset)
+                    .fetch_all(&mut **tx)
+                    .await?
             }
         };
 

@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use utoipa::{IntoParams, ToSchema};
 
-/// Query parameters for paginated and filtered document list
+/// Query parameters for paginated, filtered, and sorted document list
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
 pub struct PaginationParams {
@@ -18,6 +18,16 @@ pub struct PaginationParams {
     /// Search term to filter documents by title or content (case-insensitive)
     #[param(example = "quarterly report")]
     pub search: Option<String>,
+
+    /// Field to sort by
+    #[param(default = "created_at", example = "created_at")]
+    #[serde(default = "default_sort_by")]
+    pub sort_by: String,
+
+    /// Sort order
+    #[param(default = "desc", example = "desc")]
+    #[serde(default = "default_sort_order")]
+    pub sort_order: String,
 }
 
 fn default_page() -> i64 {
@@ -26,6 +36,14 @@ fn default_page() -> i64 {
 
 fn default_per_page() -> i64 {
     20
+}
+
+fn default_sort_by() -> String {
+    "created_at".to_string()
+}
+
+fn default_sort_order() -> String {
+    "desc".to_string()
 }
 
 impl PaginationParams {
@@ -37,6 +55,25 @@ impl PaginationParams {
     /// Get the clamped limit value (1-100)
     pub fn limit(&self) -> i64 {
         self.per_page.clamp(1, 100)
+    }
+
+    /// Get validated sort column (prevents SQL injection)
+    pub fn sort_column(&self) -> &str {
+        match self.sort_by.as_str() {
+            "created_at" => "created_at",
+            "updated_at" => "updated_at",
+            "title" => "title",
+            _ => "created_at",
+        }
+    }
+
+    /// Get validated sort direction
+    pub fn sort_direction(&self) -> &str {
+        match self.sort_order.to_lowercase().as_str() {
+            "asc" => "ASC",
+            "desc" => "DESC",
+            _ => "DESC",
+        }
     }
 }
 
