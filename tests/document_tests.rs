@@ -92,6 +92,7 @@ async fn create_document(
 
 #[tokio::test]
 async fn test_list_documents_default_pagination() {
+    let _ = tracing_subscriber::fmt::try_init();
     let pool = setup_test_db().await;
     let state = create_test_state(pool);
     let (token, state) = register_and_get_token(state).await;
@@ -111,6 +112,7 @@ async fn test_list_documents_default_pagination() {
     let app = arbak::routes::create_router(state);
     let (status, body) = make_request(app, "GET", "/api/documents", None, Some(&token)).await;
 
+    eprintln!("DEBUG: status={}, body={}", status, body);
     assert_eq!(status, StatusCode::OK);
     assert!(body["data"].is_array());
     assert!(body["pagination"]["page"].as_i64().unwrap() >= 1);
@@ -370,6 +372,7 @@ async fn test_filter_private_documents() {
     )
     .await;
 
+    eprintln!("DEBUG private: status={}, body={}", status, body);
     assert_eq!(status, StatusCode::OK);
     let docs = body["data"].as_array().unwrap();
     assert!(docs.iter().all(|d| d["is_public"].as_bool().unwrap() == false));
@@ -739,6 +742,714 @@ async fn test_requires_authentication() {
 
     // Try to list documents without token
     let (status, _) = make_request(app, "GET", "/api/documents", None, None).await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+// ============================================================================
+// Create Document Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_create_document_success() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    let app = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app,
+        "POST",
+        "/api/documents",
+        Some(json!({
+            "title": "My New Document",
+            "content": "This is the document content",
+            "is_public": false
+        })),
+        Some(&token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["title"], "My New Document");
+    assert_eq!(body["data"]["content"], "This is the document content");
+    assert_eq!(body["data"]["is_public"], false);
+    assert!(body["data"]["id"].is_string());
+    assert!(body["data"]["created_at"].is_string());
+    assert!(body["data"]["updated_at"].is_string());
+}
+
+#[tokio::test]
+async fn test_create_document_minimal() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    let app = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app,
+        "POST",
+        "/api/documents",
+        Some(json!({
+            "title": "Minimal Document",
+            "is_public": false
+        })),
+        Some(&token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["title"], "Minimal Document");
+    assert!(body["data"]["content"].is_null());
+}
+
+#[tokio::test]
+async fn test_create_document_public() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    let app = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app,
+        "POST",
+        "/api/documents",
+        Some(json!({
+            "title": "Public Document",
+            "content": "Everyone can see this",
+            "is_public": true
+        })),
+        Some(&token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["is_public"], true);
+}
+
+#[tokio::test]
+async fn test_create_document_empty_title_fails() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    let app = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app,
+        "POST",
+        "/api/documents",
+        Some(json!({
+            "title": "",
+            "is_public": false
+        })),
+        Some(&token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert!(body["error"].as_str().unwrap().contains("Title"));
+}
+
+#[tokio::test]
+async fn test_create_document_requires_auth() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let app = arbak::routes::create_router(state);
+
+    let (status, _) = make_request(
+        app,
+        "POST",
+        "/api/documents",
+        Some(json!({
+            "title": "Unauthorized Document",
+            "is_public": false
+        })),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+// ============================================================================
+// Get Document Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_get_document_success() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    // Create a document first
+    let doc = create_document(
+        state.clone(),
+        &token,
+        "Document to Retrieve",
+        Some("Content here"),
+        false,
+    )
+    .await;
+
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // Get the document
+    let app = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app,
+        "GET",
+        &format!("/api/documents/{}", doc_id),
+        None,
+        Some(&token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["id"], doc_id);
+    assert_eq!(body["data"]["title"], "Document to Retrieve");
+    assert_eq!(body["data"]["content"], "Content here");
+}
+
+#[tokio::test]
+async fn test_get_document_not_found() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    let app = arbak::routes::create_router(state);
+    let fake_id = uuid::Uuid::new_v4();
+    let (status, _) = make_request(
+        app,
+        "GET",
+        &format!("/api/documents/{}", fake_id),
+        None,
+        Some(&token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_get_document_requires_auth() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    // Create a document
+    let doc = create_document(state.clone(), &token, "Private Doc", None, false).await;
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // Try to get without auth
+    let app = arbak::routes::create_router(state);
+    let (status, _) = make_request(
+        app,
+        "GET",
+        &format!("/api/documents/{}", doc_id),
+        None,
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+// ============================================================================
+// Update Document Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_update_document_title() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    // Create a document
+    let doc = create_document(
+        state.clone(),
+        &token,
+        "Original Title",
+        Some("Original content"),
+        false,
+    )
+    .await;
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // Update the title
+    let app = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app,
+        "PUT",
+        &format!("/api/documents/{}", doc_id),
+        Some(json!({
+            "title": "Updated Title"
+        })),
+        Some(&token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["title"], "Updated Title");
+    assert_eq!(body["data"]["content"], "Original content"); // Unchanged
+}
+
+#[tokio::test]
+async fn test_update_document_content() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    // Create a document
+    let doc = create_document(
+        state.clone(),
+        &token,
+        "Title",
+        Some("Original content"),
+        false,
+    )
+    .await;
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // Update the content
+    let app = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app,
+        "PUT",
+        &format!("/api/documents/{}", doc_id),
+        Some(json!({
+            "content": "New content here"
+        })),
+        Some(&token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["title"], "Title"); // Unchanged
+    assert_eq!(body["data"]["content"], "New content here");
+}
+
+#[tokio::test]
+async fn test_update_document_visibility() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    // Create a private document
+    let doc = create_document(state.clone(), &token, "Private to Public", None, false).await;
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // Make it public
+    let app = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app,
+        "PUT",
+        &format!("/api/documents/{}", doc_id),
+        Some(json!({
+            "is_public": true
+        })),
+        Some(&token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["is_public"], true);
+}
+
+#[tokio::test]
+async fn test_update_document_all_fields() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    // Create a document
+    let doc = create_document(
+        state.clone(),
+        &token,
+        "Old Title",
+        Some("Old content"),
+        false,
+    )
+    .await;
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // Update all fields
+    let app = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app,
+        "PUT",
+        &format!("/api/documents/{}", doc_id),
+        Some(json!({
+            "title": "New Title",
+            "content": "New content",
+            "is_public": true
+        })),
+        Some(&token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["title"], "New Title");
+    assert_eq!(body["data"]["content"], "New content");
+    assert_eq!(body["data"]["is_public"], true);
+}
+
+#[tokio::test]
+async fn test_update_document_not_found() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    let app = arbak::routes::create_router(state);
+    let fake_id = uuid::Uuid::new_v4();
+    let (status, _) = make_request(
+        app,
+        "PUT",
+        &format!("/api/documents/{}", fake_id),
+        Some(json!({
+            "title": "Won't Work"
+        })),
+        Some(&token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_update_document_requires_auth() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    let doc = create_document(state.clone(), &token, "Document", None, false).await;
+    let doc_id = doc["id"].as_str().unwrap();
+
+    let app = arbak::routes::create_router(state);
+    let (status, _) = make_request(
+        app,
+        "PUT",
+        &format!("/api/documents/{}", doc_id),
+        Some(json!({
+            "title": "Unauthorized Update"
+        })),
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+// ============================================================================
+// Delete Document Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_delete_document_success() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    // Create a document
+    let doc = create_document(state.clone(), &token, "To Be Deleted", None, false).await;
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // Delete the document
+    let app = arbak::routes::create_router(state.clone());
+    let (status, body) = make_request(
+        app,
+        "DELETE",
+        &format!("/api/documents/{}", doc_id),
+        None,
+        Some(&token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["message"].as_str().unwrap().contains("deleted"));
+
+    // Verify it's gone
+    let app2 = arbak::routes::create_router(state);
+    let (status2, _) = make_request(
+        app2,
+        "GET",
+        &format!("/api/documents/{}", doc_id),
+        None,
+        Some(&token),
+    )
+    .await;
+
+    assert_eq!(status2, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_delete_document_not_found() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    let app = arbak::routes::create_router(state);
+    let fake_id = uuid::Uuid::new_v4();
+    let (status, _) = make_request(
+        app,
+        "DELETE",
+        &format!("/api/documents/{}", fake_id),
+        None,
+        Some(&token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_delete_document_requires_auth() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+
+    let doc = create_document(state.clone(), &token, "Protected Doc", None, false).await;
+    let doc_id = doc["id"].as_str().unwrap();
+
+    let app = arbak::routes::create_router(state);
+    let (status, _) = make_request(
+        app,
+        "DELETE",
+        &format!("/api/documents/{}", doc_id),
+        None,
+        None,
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+// ============================================================================
+// Share Document Tests
+// ============================================================================
+
+/// Helper to register a second user and get their ID and token
+async fn register_second_user(state: arbak::AppState) -> (String, uuid::Uuid, arbak::AppState) {
+    let app = arbak::routes::create_router(state.clone());
+    let unique_email = format!("second_user_{}@example.com", uuid::Uuid::new_v4());
+
+    let (_, body) = make_request(
+        app,
+        "POST",
+        "/api/auth/register",
+        Some(json!({
+            "email": unique_email,
+            "password": "password123"
+        })),
+        None,
+    )
+    .await;
+
+    let token = body["access_token"].as_str().unwrap().to_string();
+
+    // Get user ID from /me endpoint
+    let app2 = arbak::routes::create_router(state.clone());
+    let (_, me_body) = make_request(app2, "GET", "/api/auth/me", None, Some(&token)).await;
+
+    let user_id = uuid::Uuid::parse_str(me_body["data"]["id"].as_str().unwrap()).unwrap();
+
+    (token, user_id, state)
+}
+
+#[tokio::test]
+async fn test_share_document_success() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (owner_token, state) = register_and_get_token(state).await;
+    let (_other_token, other_user_id, state) = register_second_user(state).await;
+
+    // Create a document as owner
+    let doc = create_document(
+        state.clone(),
+        &owner_token,
+        "Document to Share",
+        Some("Shared content"),
+        false,
+    )
+    .await;
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // Share with the other user
+    let app = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app,
+        "POST",
+        &format!("/api/documents/{}/share", doc_id),
+        Some(json!({
+            "user_id": other_user_id.to_string(),
+            "can_read": true,
+            "can_write": false
+        })),
+        Some(&owner_token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["document_id"], doc_id);
+    assert_eq!(body["data"]["user_id"], other_user_id.to_string());
+    assert_eq!(body["data"]["can_read"], true);
+    assert_eq!(body["data"]["can_write"], false);
+}
+
+#[tokio::test]
+async fn test_share_document_with_write_access() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (owner_token, state) = register_and_get_token(state).await;
+    let (_other_token, other_user_id, state) = register_second_user(state).await;
+
+    let doc = create_document(state.clone(), &owner_token, "Editable Doc", None, false).await;
+    let doc_id = doc["id"].as_str().unwrap();
+
+    let app = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app,
+        "POST",
+        &format!("/api/documents/{}/share", doc_id),
+        Some(json!({
+            "user_id": other_user_id.to_string(),
+            "can_read": true,
+            "can_write": true
+        })),
+        Some(&owner_token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["can_read"], true);
+    assert_eq!(body["data"]["can_write"], true);
+}
+
+#[tokio::test]
+async fn test_share_document_update_permissions() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (owner_token, state) = register_and_get_token(state).await;
+    let (_other_token, other_user_id, state) = register_second_user(state).await;
+
+    let doc = create_document(state.clone(), &owner_token, "Permission Update", None, false).await;
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // First share with read-only
+    let app = arbak::routes::create_router(state.clone());
+    make_request(
+        app,
+        "POST",
+        &format!("/api/documents/{}/share", doc_id),
+        Some(json!({
+            "user_id": other_user_id.to_string(),
+            "can_read": true,
+            "can_write": false
+        })),
+        Some(&owner_token),
+    )
+    .await;
+
+    // Update to read-write
+    let app2 = arbak::routes::create_router(state);
+    let (status, body) = make_request(
+        app2,
+        "POST",
+        &format!("/api/documents/{}/share", doc_id),
+        Some(json!({
+            "user_id": other_user_id.to_string(),
+            "can_read": true,
+            "can_write": true
+        })),
+        Some(&owner_token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(body["data"]["can_write"], true);
+}
+
+#[tokio::test]
+async fn test_share_document_not_owner_returns_forbidden() {
+    // Non-owners cannot share documents - they get 403 Forbidden
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (owner_token, state) = register_and_get_token(state).await;
+    let (other_token, _other_user_id, state) = register_second_user(state).await;
+
+    // Third user to share with
+    let (_, third_user_id, state) = register_second_user(state).await;
+
+    // Create a document as owner
+    let doc = create_document(state.clone(), &owner_token, "Owner's Doc", None, false).await;
+    let doc_id = doc["id"].as_str().unwrap();
+
+    // Try to share as non-owner - should be forbidden
+    let app = arbak::routes::create_router(state);
+    let (status, _) = make_request(
+        app,
+        "POST",
+        &format!("/api/documents/{}/share", doc_id),
+        Some(json!({
+            "user_id": third_user_id.to_string(),
+            "can_read": true,
+            "can_write": false
+        })),
+        Some(&other_token),
+    )
+    .await;
+
+    // Non-owner gets FORBIDDEN
+    assert_eq!(status, StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn test_share_document_not_found() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+    let (_, other_user_id, state) = register_second_user(state).await;
+
+    let app = arbak::routes::create_router(state);
+    let fake_id = uuid::Uuid::new_v4();
+    let (status, _) = make_request(
+        app,
+        "POST",
+        &format!("/api/documents/{}/share", fake_id),
+        Some(json!({
+            "user_id": other_user_id.to_string(),
+            "can_read": true,
+            "can_write": false
+        })),
+        Some(&token),
+    )
+    .await;
+
+    assert_eq!(status, StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn test_share_document_requires_auth() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let (token, state) = register_and_get_token(state).await;
+    let (_, other_user_id, state) = register_second_user(state).await;
+
+    let doc = create_document(state.clone(), &token, "Protected Share", None, false).await;
+    let doc_id = doc["id"].as_str().unwrap();
+
+    let app = arbak::routes::create_router(state);
+    let (status, _) = make_request(
+        app,
+        "POST",
+        &format!("/api/documents/{}/share", doc_id),
+        Some(json!({
+            "user_id": other_user_id.to_string(),
+            "can_read": true,
+            "can_write": false
+        })),
+        None,
+    )
+    .await;
 
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
