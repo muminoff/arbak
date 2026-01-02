@@ -3,10 +3,10 @@ use axum::{
     http::{header, Request, StatusCode},
 };
 use serde_json::{json, Value};
-use tower::ServiceExt;
+use tower::util::ServiceExt;
 
 mod common {
-    include!("../common/mod.rs");
+    include!("common/mod.rs");
 }
 
 use common::{create_test_state, setup_test_db};
