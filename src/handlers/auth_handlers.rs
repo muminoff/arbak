@@ -3,12 +3,14 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
+use serde::Deserialize;
+use utoipa::ToSchema;
 
 use crate::{
-    auth::AuthUser,
-    error::{AppResult, ErrorResponse},
+    auth::{hash_password, AuthUser},
+    error::{AppError, AppResult, ErrorResponse},
     models::{CreateUser, UserWithRoles},
-    repositories::UserRepository,
+    repositories::{PasswordResetRepository, UserRepository},
     services::{AuthResponse, AuthService, LoginRequest},
     AppState,
 };
@@ -140,11 +142,142 @@ async fn me(
     Ok(Json(serde_json::json!({ "data": user })))
 }
 
+// ============================================================================
+// Password Reset
+// ============================================================================
+
+/// Request body for forgot password
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ForgotPasswordRequest {
+    /// Email address of the account to reset
+    #[schema(example = "user@example.com", format = "email")]
+    pub email: String,
+}
+
+/// Request body for password reset
+#[derive(Debug, Deserialize, ToSchema)]
+pub struct ResetPasswordRequest {
+    /// The reset token received via email
+    #[schema(example = "abc123def456...")]
+    pub token: String,
+    /// New password (must be at least 8 characters)
+    #[schema(example = "newsecurepassword123", min_length = 8)]
+    pub password: String,
+}
+
+/// Generic success response
+#[derive(serde::Serialize, ToSchema)]
+pub struct MessageResponse {
+    /// Success message
+    #[schema(example = "Password reset email sent")]
+    pub message: String,
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/auth/forgot-password",
+    tag = "auth",
+    operation_id = "forgotPassword",
+    summary = "Request password reset",
+    description = "Initiates a password reset by sending a reset link to the provided email address. \
+                   For security reasons, this endpoint always returns success even if the email is not registered. \
+                   The reset token expires after 1 hour.",
+    request_body(
+        description = "Email address for password reset",
+        content = ForgotPasswordRequest
+    ),
+    responses(
+        (status = 200, description = "Password reset initiated (check console for reset link in development)", body = MessageResponse),
+        (status = 400, description = "Invalid email format", body = ErrorResponse)
+    )
+)]
+async fn forgot_password(
+    State(state): State<AppState>,
+    Json(input): Json<ForgotPasswordRequest>,
+) -> AppResult<Json<MessageResponse>> {
+    // Always return success to prevent email enumeration
+    let response = MessageResponse {
+        message: "If the email exists, a password reset link has been sent".to_string(),
+    };
+
+    // Check if user exists
+    let user = UserRepository::find_by_email(&state.pool, &input.email).await?;
+
+    if let Some(user) = user {
+        // Generate reset token
+        let token = PasswordResetRepository::create_token(&state.pool, user.id).await?;
+
+        // Log the reset link (in production, this would send an email)
+        let reset_link = format!(
+            "http://localhost:3000/reset-password?token={}",
+            token
+        );
+        tracing::info!(
+            "Password reset requested for {}: {}",
+            input.email,
+            reset_link
+        );
+    }
+
+    Ok(Json(response))
+}
+
+#[utoipa::path(
+    post,
+    path = "/api/auth/reset-password",
+    tag = "auth",
+    operation_id = "resetPassword",
+    summary = "Reset password with token",
+    description = "Resets the user's password using a valid reset token. The token must not be expired or already used. \
+                   After successful reset, all existing reset tokens for this user are invalidated.",
+    request_body(
+        description = "Reset token and new password",
+        content = ResetPasswordRequest
+    ),
+    responses(
+        (status = 200, description = "Password reset successfully", body = MessageResponse),
+        (status = 400, description = "Invalid or expired token, or password too short", body = ErrorResponse)
+    )
+)]
+async fn reset_password(
+    State(state): State<AppState>,
+    Json(input): Json<ResetPasswordRequest>,
+) -> AppResult<Json<MessageResponse>> {
+    // Validate password length
+    if input.password.len() < 8 {
+        return Err(AppError::Validation(
+            "Password must be at least 8 characters".to_string(),
+        ));
+    }
+
+    // Find valid token
+    let user_id = PasswordResetRepository::find_valid_token(&state.pool, &input.token)
+        .await?
+        .ok_or_else(|| AppError::Validation("Invalid or expired reset token".to_string()))?;
+
+    // Hash the new password
+    let password_hash = hash_password(&input.password)?;
+
+    // Update the password
+    UserRepository::update_password(&state.pool, user_id, &password_hash).await?;
+
+    // Invalidate all reset tokens for this user
+    PasswordResetRepository::invalidate_user_tokens(&state.pool, user_id).await?;
+
+    tracing::info!("Password reset successful for user {}", user_id);
+
+    Ok(Json(MessageResponse {
+        message: "Password has been reset successfully".to_string(),
+    }))
+}
+
 /// Create auth routes - split into public and protected
 pub fn auth_routes() -> (Router<AppState>, Router<AppState>) {
     let public = Router::new()
         .route("/register", post(register))
-        .route("/login", post(login));
+        .route("/login", post(login))
+        .route("/forgot-password", post(forgot_password))
+        .route("/reset-password", post(reset_password));
 
     let protected = Router::new()
         .route("/refresh", post(refresh))

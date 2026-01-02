@@ -6,7 +6,11 @@ use utoipa::{
 use crate::{
     error::ErrorResponse,
     handlers::{
-        auth_handlers::{__path_login, __path_me, __path_refresh, __path_register, UserResponse},
+        auth_handlers::{
+            __path_forgot_password, __path_login, __path_me, __path_refresh, __path_register,
+            __path_reset_password, ForgotPasswordRequest, MessageResponse, ResetPasswordRequest,
+            UserResponse,
+        },
         document_handlers::{
             __path_create_document, __path_delete_document, __path_get_document,
             __path_list_documents, __path_share_document, __path_update_document,
@@ -71,6 +75,8 @@ use crate::{
         login,
         refresh,
         me,
+        forgot_password,
+        reset_password,
         // Users
         list_users,
         get_user,
@@ -109,6 +115,9 @@ use crate::{
             AuthResponse,
             UserWithRoles,
             UserResponse,
+            ForgotPasswordRequest,
+            ResetPasswordRequest,
+            MessageResponse,
             // Users
             User,
             UpdateUser,
