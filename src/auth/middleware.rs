@@ -8,6 +8,7 @@ use axum::{
 use crate::{
     auth::{decode_token, Claims},
     error::{AppError, AppResult},
+    repositories::RevokedTokenRepository,
     AppState,
 };
 
@@ -36,6 +37,11 @@ pub async fn auth_middleware(
 ) -> Result<Response, AppError> {
     let token = extract_bearer_token(&request)?;
     let claims = decode_token(token, &state.config.jwt_secret)?;
+
+    // Check if token has been revoked (logout)
+    if RevokedTokenRepository::is_token_revoked(&state.pool, claims.jti).await? {
+        return Err(AppError::Unauthorized);
+    }
 
     // Store claims in request extensions for handlers to access
     request.extensions_mut().insert(claims);

@@ -763,3 +763,98 @@ async fn test_reset_password_token_cannot_be_reused() {
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert!(body["error"].as_str().unwrap().contains("Invalid or expired"));
 }
+
+// ============================================================================
+// Logout Tests
+// ============================================================================
+
+#[tokio::test]
+async fn test_logout_success() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool.clone());
+
+    let unique_email = format!("logout_{}@example.com", uuid::Uuid::new_v4());
+    let (token, state) = register_and_verify_user(&pool, state, &unique_email, "password123").await;
+
+    // Logout should succeed
+    let app = arbak::routes::create_router(state.clone());
+    let (status, body) = make_request(app, "POST", "/api/auth/logout", None, Some(&token)).await;
+
+    assert_eq!(status, StatusCode::OK);
+    assert!(body["message"].as_str().unwrap().contains("Logout successful"));
+}
+
+#[tokio::test]
+async fn test_logout_requires_auth() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool);
+    let app = arbak::routes::create_router(state);
+
+    let (status, _) = make_request(app, "POST", "/api/auth/logout", None, None).await;
+
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_logout_invalidates_token() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool.clone());
+
+    let unique_email = format!("logout_invalidate_{}@example.com", uuid::Uuid::new_v4());
+    let (token, state) = register_and_verify_user(&pool, state, &unique_email, "password123").await;
+
+    // Verify token works before logout
+    let app = arbak::routes::create_router(state.clone());
+    let (status, _) = make_request(app, "GET", "/api/auth/me", None, Some(&token)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Logout
+    let app = arbak::routes::create_router(state.clone());
+    let (status, _) = make_request(app, "POST", "/api/auth/logout", None, Some(&token)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // Token should no longer work
+    let app = arbak::routes::create_router(state);
+    let (status, _) = make_request(app, "GET", "/api/auth/me", None, Some(&token)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn test_logout_only_invalidates_current_token() {
+    let pool = setup_test_db().await;
+    let state = create_test_state(pool.clone());
+
+    let unique_email = format!("logout_multi_{}@example.com", uuid::Uuid::new_v4());
+    let (token1, state) = register_and_verify_user(&pool, state, &unique_email, "password123").await;
+
+    // Login again to get a second token
+    let app = arbak::routes::create_router(state.clone());
+    let (status, body) = make_request(
+        app,
+        "POST",
+        "/api/auth/login",
+        Some(json!({
+            "email": &unique_email,
+            "password": "password123"
+        })),
+        None,
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    let token2 = body["access_token"].as_str().unwrap().to_string();
+
+    // Logout with first token
+    let app = arbak::routes::create_router(state.clone());
+    let (status, _) = make_request(app, "POST", "/api/auth/logout", None, Some(&token1)).await;
+    assert_eq!(status, StatusCode::OK);
+
+    // First token should be invalid
+    let app = arbak::routes::create_router(state.clone());
+    let (status, _) = make_request(app, "GET", "/api/auth/me", None, Some(&token1)).await;
+    assert_eq!(status, StatusCode::UNAUTHORIZED);
+
+    // Second token should still work
+    let app = arbak::routes::create_router(state);
+    let (status, _) = make_request(app, "GET", "/api/auth/me", None, Some(&token2)).await;
+    assert_eq!(status, StatusCode::OK);
+}

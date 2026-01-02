@@ -12,6 +12,7 @@ pub struct Claims {
     pub roles: Vec<String>, // role names (for client-side UI)
     pub exp: i64,           // expiration timestamp
     pub iat: i64,           // issued at
+    pub jti: Uuid,          // JWT ID (for token revocation)
 }
 
 impl Claims {
@@ -23,6 +24,7 @@ impl Claims {
             roles,
             iat: now.timestamp(),
             exp: (now + Duration::seconds(expiration_seconds)).timestamp(),
+            jti: Uuid::new_v4(),
         }
     }
 }

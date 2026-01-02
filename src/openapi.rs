@@ -7,8 +7,8 @@ use crate::{
     error::ErrorResponse,
     handlers::{
         auth_handlers::{
-            __path_forgot_password, __path_login, __path_me, __path_refresh, __path_register,
-            __path_resend_verification, __path_reset_password, __path_verify_email,
+            __path_forgot_password, __path_login, __path_logout, __path_me, __path_refresh,
+            __path_register, __path_resend_verification, __path_reset_password, __path_verify_email,
             ForgotPasswordRequest, MessageResponse, ResendVerificationRequest, ResetPasswordRequest,
             UserResponse, VerifyEmailRequest,
         },
@@ -74,6 +74,7 @@ use crate::{
         // Auth
         register,
         login,
+        logout,
         verify_email,
         resend_verification,
         refresh,

@@ -6,11 +6,13 @@ use axum::{
 use serde::Deserialize;
 use utoipa::ToSchema;
 
+use chrono::{DateTime, Utc};
+
 use crate::{
     auth::{hash_password, AuthUser},
     error::{AppError, AppResult, ErrorResponse},
     models::{CreateUser, UserWithRoles},
-    repositories::{EmailVerificationRepository, PasswordResetRepository, UserRepository},
+    repositories::{EmailVerificationRepository, PasswordResetRepository, RevokedTokenRepository, UserRepository},
     services::{AuthResponse, AuthService, LoginRequest, RegisterResponse},
     AppState,
 };
@@ -378,6 +380,43 @@ async fn reset_password(
     }))
 }
 
+// ============================================================================
+// Logout
+// ============================================================================
+
+#[utoipa::path(
+    post,
+    path = "/api/auth/logout",
+    tag = "auth",
+    operation_id = "logoutUser",
+    summary = "Logout and invalidate token",
+    description = "Invalidates the current JWT token by adding it to a blacklist. \
+                   After logout, the token can no longer be used for authentication. \
+                   The token remains in the blacklist until its original expiration time.",
+    security(("bearer_auth" = [])),
+    responses(
+        (status = 200, description = "Logout successful, token invalidated", body = MessageResponse),
+        (status = 401, description = "Missing or invalid authentication token", body = ErrorResponse)
+    )
+)]
+async fn logout(
+    State(state): State<AppState>,
+    AuthUser(claims): AuthUser,
+) -> AppResult<Json<MessageResponse>> {
+    // Calculate token expiration time from claims
+    let expires_at = DateTime::<Utc>::from_timestamp(claims.exp, 0)
+        .unwrap_or_else(Utc::now);
+
+    // Add token to blacklist
+    RevokedTokenRepository::revoke_token(&state.pool, claims.jti, claims.sub, expires_at).await?;
+
+    tracing::info!("User {} logged out, token {} revoked", claims.sub, claims.jti);
+
+    Ok(Json(MessageResponse {
+        message: "Logout successful".to_string(),
+    }))
+}
+
 /// Create auth routes - split into public and protected
 pub fn auth_routes() -> (Router<AppState>, Router<AppState>) {
     let public = Router::new()
@@ -390,7 +429,8 @@ pub fn auth_routes() -> (Router<AppState>, Router<AppState>) {
 
     let protected = Router::new()
         .route("/refresh", post(refresh))
-        .route("/me", get(me));
+        .route("/me", get(me))
+        .route("/logout", post(logout));
 
     (public, protected)
 }
